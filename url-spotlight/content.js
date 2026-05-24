@@ -27,9 +27,10 @@
     }
   }
 
-  function navigate(url) {
+  function navigate(url, newTab) {
     close();
-    chrome.runtime.sendMessage({ type: "OPEN_NEW_TAB", url }, () => {
+    const type = newTab ? "OPEN_NEW_TAB" : "OPEN_CURRENT_TAB";
+    chrome.runtime.sendMessage({ type, url }, () => {
       void chrome.runtime.lastError;
     });
   }
@@ -71,7 +72,7 @@
       row.addEventListener("mousedown", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        navigate(s.url);
+        navigate(s.url, e.shiftKey);
       });
       row.addEventListener("mouseenter", () => {
         selectedIdx = i;
@@ -250,7 +251,7 @@
 
     const hint = document.createElement("div");
     hint.className = "hint";
-    hint.textContent = "↵ navigate  ·  ↑↓ pick  ·  esc close";
+    hint.textContent = "↵ open  ·  ⇧↵ new tab  ·  ↑↓ pick  ·  esc close";
 
     panel.appendChild(input);
     panel.appendChild(suggestionsEl);
@@ -277,11 +278,12 @@
       e.stopPropagation();
       if (e.key === "Enter") {
         e.preventDefault();
+        const newTab = e.shiftKey;
         if (selectedIdx >= 0 && suggestions[selectedIdx]) {
-          navigate(suggestions[selectedIdx].url);
+          navigate(suggestions[selectedIdx].url, newTab);
         } else {
           const url = resolveQuery(input.value);
-          if (url) navigate(url);
+          if (url) navigate(url, newTab);
         }
       } else if (e.key === "Escape") {
         e.preventDefault();

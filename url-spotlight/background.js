@@ -26,6 +26,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  if (msg && msg.type === "OPEN_CURRENT_TAB" && msg.url) {
+    const tabId = sender.tab && sender.tab.id;
+    if (tabId) {
+      chrome.tabs.update(tabId, { url: msg.url }, () => {
+        void chrome.runtime.lastError;
+      });
+    } else {
+      chrome.tabs.update({ url: msg.url }, () => {
+        void chrome.runtime.lastError;
+      });
+    }
+    return false;
+  }
+
   if (!msg || msg.type !== "SEARCH_SUGGESTIONS") return false;
 
   const query = (msg.query || "").trim();
