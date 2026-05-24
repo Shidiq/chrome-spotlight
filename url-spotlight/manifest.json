@@ -16,6 +16,9 @@
       "all_frames": false
     }
   ],
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
   "commands": {
     "toggle-spotlight": {
       "suggested_key": {
