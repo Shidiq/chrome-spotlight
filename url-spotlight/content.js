@@ -29,7 +29,9 @@
 
   function navigate(url) {
     close();
-    window.location.href = url;
+    chrome.runtime.sendMessage({ type: "OPEN_NEW_TAB", url }, () => {
+      void chrome.runtime.lastError;
+    });
   }
 
   function renderSuggestions() {

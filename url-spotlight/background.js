@@ -18,7 +18,14 @@ chrome.commands.onCommand.addListener((command, tab) => {
   });
 });
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === "OPEN_NEW_TAB" && msg.url) {
+    chrome.tabs.create({ url: msg.url, active: true }, () => {
+      void chrome.runtime.lastError;
+    });
+    return false;
+  }
+
   if (!msg || msg.type !== "SEARCH_SUGGESTIONS") return false;
 
   const query = (msg.query || "").trim();
