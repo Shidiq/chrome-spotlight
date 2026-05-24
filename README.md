@@ -14,7 +14,9 @@ Chrome/Helium extension. Spotlight-style overlay for URL navigation and search, 
 - Press shortcut on any http(s) page → overlay appears
 - Type URL, domain, or search query
 - `↑` / `↓` pick suggestion from bookmarks/history
-- `Enter` navigate
+- `Enter` open in current tab
+- `Shift+Enter` open in new tab
+- Click suggestion to open in current tab, `Shift+Click` to open in new tab
 - `Esc` or click outside to close
 
 ## Navigation logic
