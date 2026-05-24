@@ -19,6 +19,8 @@ Chrome/Helium extension. Spotlight-style overlay for URL navigation and search, 
 - Click suggestion to open in current tab, `Shift+Click` to open in new tab
 - `Esc` or click outside to close
 
+![URL Spotlight overlay](image.png)
+
 ## Navigation logic
 
 - Starts with `http://` or `https://` → direct
