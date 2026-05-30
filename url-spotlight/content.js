@@ -1,17 +1,35 @@
 (() => {
+  const SEARCH_ENGINES = {
+    duckduckgo: { name: "DuckDuckGo", url: "https://duckduckgo.com/?q=" },
+    google: { name: "Google", url: "https://www.google.com/search?q=" },
+    brave: { name: "Brave", url: "https://search.brave.com/search?q=" },
+    startpage: { name: "Startpage", url: "https://www.startpage.com/sp/search?query=" },
+    bing: { name: "Bing", url: "https://www.bing.com/search?q=" }
+  };
+  const DEFAULT_ENGINE = "duckduckgo";
+
   let hostEl = null;
   let suggestionsEl = null;
   let suggestions = [];
   let selectedIdx = -1;
   let debounceTimer = null;
   let lastQueryId = 0;
+  let searchEngine = DEFAULT_ENGINE;
+
+  chrome.storage.sync.get({ searchEngine: DEFAULT_ENGINE }, (r) => {
+    searchEngine = r.searchEngine;
+  });
+  chrome.storage.onChanged.addListener((c, area) => {
+    if (area === "sync" && c.searchEngine) searchEngine = c.searchEngine.newValue;
+  });
 
   function resolveQuery(raw) {
     const trimmed = raw.trim();
     if (!trimmed) return null;
     if (/^https?:\/\//i.test(trimmed)) return trimmed;
     if (!/\s/.test(trimmed) && /\./.test(trimmed)) return "https://" + trimmed;
-    return "https://www.google.com/search?q=" + encodeURIComponent(trimmed);
+    const engine = SEARCH_ENGINES[searchEngine] || SEARCH_ENGINES[DEFAULT_ENGINE];
+    return engine.url + encodeURIComponent(trimmed);
   }
 
   function close() {
