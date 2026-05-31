@@ -15,6 +15,8 @@
   let debounceTimer = null;
   let lastQueryId = 0;
   let searchEngine = DEFAULT_ENGINE;
+  let mode = "url";
+  let allTabs = [];
 
   chrome.storage.sync.get({ searchEngine: DEFAULT_ENGINE }, (r) => {
     searchEngine = r.searchEngine;
@@ -53,6 +55,68 @@
     });
   }
 
+  function activateTab(tabId, windowId) {
+    close();
+    chrome.runtime.sendMessage({ type: "ACTIVATE_TAB", tabId, windowId }, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+
+  function onSelect(s, newTab) {
+    if (!s) return;
+    if (s.type === "tab") activateTab(s.tabId, s.windowId);
+    else navigate(s.url, newTab);
+  }
+
+  // Case-insensitive subsequence match. Returns a score (higher is better),
+  // or -1 if not every query char is found in order.
+  function fuzzyScore(query, text) {
+    if (!query) return 0;
+    const q = query.toLowerCase();
+    const t = (text || "").toLowerCase();
+    let qi = 0;
+    let score = 0;
+    let prevIdx = -1;
+    for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+      if (t[ti] === q[qi]) {
+        score += prevIdx === ti - 1 ? 3 : 1; // contiguous-run bonus
+        if (ti === 0) score += 2; // start-of-string boost
+        prevIdx = ti;
+        qi++;
+      }
+    }
+    return qi === q.length ? score : -1;
+  }
+
+  function toTabSuggestion(t) {
+    return {
+      type: "tab",
+      title: t.title || t.url,
+      url: t.url,
+      tabId: t.tabId,
+      windowId: t.windowId,
+      favIconUrl: t.favIconUrl,
+    };
+  }
+
+  function filterTabs(query) {
+    const q = query.trim();
+    if (!q) {
+      suggestions = allTabs.map(toTabSuggestion);
+    } else {
+      suggestions = allTabs
+        .map((t) => ({
+          t,
+          score: Math.max(fuzzyScore(q, t.title), fuzzyScore(q, t.url)),
+        }))
+        .filter((x) => x.score >= 0)
+        .sort((a, b) => b.score - a.score)
+        .map((x) => toTabSuggestion(x.t));
+    }
+    selectedIdx = suggestions.length ? 0 : -1;
+    renderSuggestions();
+  }
+
   function renderSuggestions() {
     if (!suggestionsEl) return;
     suggestionsEl.innerHTML = "";
@@ -67,9 +131,23 @@
       const row = document.createElement("div");
       row.className = "row" + (i === selectedIdx ? " selected" : "");
 
-      const icon = document.createElement("span");
-      icon.className = "icon";
-      icon.textContent = s.type === "bookmark" ? "★" : "↻";
+      let icon;
+      if (s.type === "tab" && s.favIconUrl) {
+        icon = document.createElement("img");
+        icon.className = "favicon";
+        icon.src = s.favIconUrl;
+        icon.addEventListener("error", () => {
+          const fallback = document.createElement("span");
+          fallback.className = "icon";
+          fallback.textContent = "▢";
+          icon.replaceWith(fallback);
+        });
+      } else {
+        icon = document.createElement("span");
+        icon.className = "icon";
+        icon.textContent =
+          s.type === "tab" ? "▢" : s.type === "bookmark" ? "★" : "↻";
+      }
 
       const text = document.createElement("div");
       text.className = "text";
@@ -90,7 +168,7 @@
       row.addEventListener("mousedown", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        navigate(s.url, e.shiftKey);
+        onSelect(s, e.shiftKey);
       });
       row.addEventListener("mouseenter", () => {
         selectedIdx = i;
@@ -126,6 +204,10 @@
   }
 
   function onInputChange(value) {
+    if (mode === "tabs") {
+      filterTabs(value);
+      return;
+    }
     if (debounceTimer) clearTimeout(debounceTimer);
     const trimmed = value.trim();
     if (!trimmed) {
@@ -138,8 +220,10 @@
     debounceTimer = setTimeout(() => requestSuggestions(trimmed), 80);
   }
 
-  function open() {
+  function open(openMode) {
     if (hostEl) return;
+    mode = openMode === "tabs" ? "tabs" : "url";
+    allTabs = [];
 
     hostEl = document.createElement("div");
     hostEl.style.all = "initial";
@@ -220,6 +304,13 @@
         font-size: 13px;
         color: #888888;
       }
+      .favicon {
+        flex: 0 0 auto;
+        width: 16px;
+        height: 16px;
+        border-radius: 3px;
+        object-fit: contain;
+      }
       .row.selected .icon {
         color: #ffffff;
       }
@@ -260,7 +351,8 @@
     const input = document.createElement("input");
     input.type = "text";
     input.className = "spotlight-input";
-    input.placeholder = "Search or enter URL...";
+    input.placeholder =
+      mode === "tabs" ? "Switch to tab..." : "Search or enter URL...";
     input.autocomplete = "off";
     input.spellcheck = false;
 
@@ -269,7 +361,10 @@
 
     const hint = document.createElement("div");
     hint.className = "hint";
-    hint.textContent = "↵ open  ·  ⇧↵ new tab  ·  ↑↓ pick  ·  esc close";
+    hint.textContent =
+      mode === "tabs"
+        ? "↵ switch  ·  ↑↓ pick  ·  esc close"
+        : "↵ open  ·  ⇧↵ new tab  ·  ↑↓ pick  ·  esc close";
 
     panel.appendChild(input);
     panel.appendChild(suggestionsEl);
@@ -281,6 +376,15 @@
 
     requestAnimationFrame(() => panel.classList.add("visible"));
     setTimeout(() => input.focus(), 0);
+
+    if (mode === "tabs") {
+      chrome.runtime.sendMessage({ type: "GET_TABS" }, (response) => {
+        void chrome.runtime.lastError;
+        if (!hostEl || mode !== "tabs") return;
+        allTabs = (response && response.tabs) || [];
+        filterTabs("");
+      });
+    }
 
     backdrop.addEventListener("mousedown", (e) => {
       e.preventDefault();
@@ -298,8 +402,8 @@
         e.preventDefault();
         const newTab = e.shiftKey;
         if (selectedIdx >= 0 && suggestions[selectedIdx]) {
-          navigate(suggestions[selectedIdx].url, newTab);
-        } else {
+          onSelect(suggestions[selectedIdx], newTab);
+        } else if (mode !== "tabs") {
           const url = resolveQuery(input.value);
           if (url) navigate(url, newTab);
         }
@@ -325,8 +429,17 @@
   }
 
   chrome.runtime.onMessage.addListener((msg) => {
-    if (!msg || msg.type !== "TOGGLE_SPOTLIGHT") return;
-    if (hostEl) close();
-    else open();
+    if (!msg) return;
+    let requestedMode;
+    if (msg.type === "TOGGLE_SPOTLIGHT") requestedMode = "url";
+    else if (msg.type === "TOGGLE_TAB_SWITCHER") requestedMode = "tabs";
+    else return;
+
+    if (hostEl && mode === requestedMode) {
+      close();
+    } else {
+      if (hostEl) close();
+      open(requestedMode);
+    }
   });
 })();

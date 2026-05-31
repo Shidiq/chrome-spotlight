@@ -1,6 +1,6 @@
 # URL Spotlight
 
-Chrome/Helium extension. Spotlight-style overlay for URL navigation and search, with bookmark + history suggestions.
+Chrome/Helium extension. Spotlight-style overlay for URL navigation and search, with bookmark + history suggestions. Also a tab switcher: fuzzy-find and jump to any open tab.
 
 ## Install
 
@@ -20,6 +20,13 @@ Chrome/Helium extension. Spotlight-style overlay for URL navigation and search, 
 - `Esc` or click outside to close
 
 ![URL Spotlight overlay](image.png)
+
+## Tab switcher
+
+- Press `Cmd+Shift+O` (`Ctrl+Shift+O` on Windows/Linux) on any http(s) page → overlay lists all open tabs (across every window) with favicons, most-recently-used first
+- Type to **fuzzy-filter** by tab title or URL (chars match out of order)
+- `↑` / `↓` pick, `Enter` or click to switch to that tab (focuses its window), `Esc` to close
+- The default `Cmd+Shift+O` may be reserved by the browser. If the shortcut does nothing, assign it manually at `chrome://extensions/shortcuts`.
 
 ## Navigation logic
 

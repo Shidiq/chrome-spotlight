@@ -1,5 +1,10 @@
-function sendToggle(tabId) {
-  chrome.tabs.sendMessage(tabId, { type: "TOGGLE_SPOTLIGHT" }, () => {
+const COMMAND_MESSAGES = {
+  "toggle-spotlight": "TOGGLE_SPOTLIGHT",
+  "switch-tabs": "TOGGLE_TAB_SWITCHER",
+};
+
+function sendToggle(tabId, msgType) {
+  chrome.tabs.sendMessage(tabId, { type: msgType }, () => {
     const err = chrome.runtime.lastError;
     if (err) console.log("[spotlight bg] toggle err:", err.message);
   });
@@ -7,13 +12,14 @@ function sendToggle(tabId) {
 
 chrome.commands.onCommand.addListener((command, tab) => {
   console.log("[spotlight bg] command:", command, "tab:", tab?.id);
-  if (command !== "toggle-spotlight") return;
+  const msgType = COMMAND_MESSAGES[command];
+  if (!msgType) return;
   if (tab && tab.id) {
-    sendToggle(tab.id);
+    sendToggle(tab.id, msgType);
     return;
   }
   chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-    if (tabs[0] && tabs[0].id) sendToggle(tabs[0].id);
+    if (tabs[0] && tabs[0].id) sendToggle(tabs[0].id, msgType);
     else console.log("[spotlight bg] no active tab found");
   });
 });
@@ -37,6 +43,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         void chrome.runtime.lastError;
       });
     }
+    return false;
+  }
+
+  if (msg && msg.type === "GET_TABS") {
+    chrome.tabs.query({}, (tabs) => {
+      const list = (tabs || [])
+        .filter((t) => t.id != null)
+        .map((t) => ({
+          tabId: t.id,
+          windowId: t.windowId,
+          title: t.title || t.url || "",
+          url: t.url || "",
+          favIconUrl: t.favIconUrl || "",
+          active: !!t.active,
+          lastAccessed: t.lastAccessed || 0,
+        }))
+        .sort((a, b) => b.lastAccessed - a.lastAccessed);
+      sendResponse({ tabs: list });
+    });
+    return true;
+  }
+
+  if (msg && msg.type === "ACTIVATE_TAB" && msg.tabId != null) {
+    chrome.tabs.update(msg.tabId, { active: true }, () => {
+      void chrome.runtime.lastError;
+      if (msg.windowId != null) {
+        chrome.windows.update(msg.windowId, { focused: true }, () => {
+          void chrome.runtime.lastError;
+        });
+      }
+    });
     return false;
   }
 
