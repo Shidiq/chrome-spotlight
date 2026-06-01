@@ -5,6 +5,18 @@
   "description": "Spotlight-style URL bar overlay. Press Ctrl+T to navigate or search from any page.",
   "permissions": ["activeTab", "tabs", "bookmarks", "history", "storage"],
   "host_permissions": ["<all_urls>"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true
