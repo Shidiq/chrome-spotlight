@@ -38,6 +38,16 @@
       outline: none;
     }
     select:focus { border-color: #5b8cff; }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 18px;
+      color: #c4c9d2;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .toggle-row input { width: 16px; height: 16px; accent-color: #5b8cff; cursor: pointer; }
     .status {
       margin-top: 14px;
       height: 16px;
@@ -55,6 +65,10 @@
     <p class="sub">Default search engine</p>
     <label for="engine">Search with</label>
     <select id="engine"></select>
+    <label class="toggle-row" for="loadingAnim">
+      <span>Page loading animation</span>
+      <input type="checkbox" id="loadingAnim">
+    </label>
     <div class="status" id="status">Saved</div>
   </div>
   <script src="options.js"></script>

@@ -8,7 +8,15 @@ const SEARCH_ENGINES = {
 const DEFAULT_ENGINE = "duckduckgo";
 
 const select = document.getElementById("engine");
+const loadingAnim = document.getElementById("loadingAnim");
 const status = document.getElementById("status");
+
+let statusTimer = null;
+function showSaved() {
+  status.classList.add("show");
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => status.classList.remove("show"), 1500);
+}
 
 for (const [key, { name }] of Object.entries(SEARCH_ENGINES)) {
   const opt = document.createElement("option");
@@ -17,15 +25,18 @@ for (const [key, { name }] of Object.entries(SEARCH_ENGINES)) {
   select.appendChild(opt);
 }
 
-chrome.storage.sync.get({ searchEngine: DEFAULT_ENGINE }, (r) => {
-  select.value = SEARCH_ENGINES[r.searchEngine] ? r.searchEngine : DEFAULT_ENGINE;
+chrome.storage.sync.get(
+  { searchEngine: DEFAULT_ENGINE, loadingAnimation: true },
+  (r) => {
+    select.value = SEARCH_ENGINES[r.searchEngine] ? r.searchEngine : DEFAULT_ENGINE;
+    loadingAnim.checked = r.loadingAnimation;
+  }
+);
+
+select.addEventListener("change", () => {
+  chrome.storage.sync.set({ searchEngine: select.value }, showSaved);
 });
 
-let statusTimer = null;
-select.addEventListener("change", () => {
-  chrome.storage.sync.set({ searchEngine: select.value }, () => {
-    status.classList.add("show");
-    clearTimeout(statusTimer);
-    statusTimer = setTimeout(() => status.classList.remove("show"), 1500);
-  });
+loadingAnim.addEventListener("change", () => {
+  chrome.storage.sync.set({ loadingAnimation: loadingAnim.checked }, showSaved);
 });

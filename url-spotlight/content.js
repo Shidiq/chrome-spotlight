@@ -15,14 +15,21 @@
   let debounceTimer = null;
   let lastQueryId = 0;
   let searchEngine = DEFAULT_ENGINE;
+  let loadingAnimation = true;
   let mode = "url";
   let allTabs = [];
 
-  chrome.storage.sync.get({ searchEngine: DEFAULT_ENGINE }, (r) => {
-    searchEngine = r.searchEngine;
-  });
+  chrome.storage.sync.get(
+    { searchEngine: DEFAULT_ENGINE, loadingAnimation: true },
+    (r) => {
+      searchEngine = r.searchEngine;
+      loadingAnimation = r.loadingAnimation;
+    }
+  );
   chrome.storage.onChanged.addListener((c, area) => {
-    if (area === "sync" && c.searchEngine) searchEngine = c.searchEngine.newValue;
+    if (area !== "sync") return;
+    if (c.searchEngine) searchEngine = c.searchEngine.newValue;
+    if (c.loadingAnimation) loadingAnimation = c.loadingAnimation.newValue;
   });
 
   function resolveQuery(raw) {
@@ -49,6 +56,16 @@
 
   function navigate(url, newTab) {
     close();
+    // Same-tab navigation reloads this page — show the loader immediately to
+    // bridge the wait before the destination's document_start fires. New-tab
+    // navigation leaves the current page untouched, so no loader.
+    if (!newTab && loadingAnimation && window.__spotlightLoader) {
+      window.__spotlightLoader.show();
+      // Safety net: if navigation fails, don't leave a stuck overlay.
+      setTimeout(() => {
+        if (window.__spotlightLoader) window.__spotlightLoader.hide();
+      }, 8000);
+    }
     const type = newTab ? "OPEN_NEW_TAB" : "OPEN_CURRENT_TAB";
     chrome.runtime.sendMessage({ type, url }, () => {
       void chrome.runtime.lastError;
