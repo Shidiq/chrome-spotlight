@@ -21,13 +21,17 @@
     const shadow = hostEl.attachShadow({ mode: "closed" });
     const style = document.createElement("style");
     style.textContent = `
+      :host { --sp-backdrop: rgba(15, 17, 23, 0.55); }
+      @media (prefers-color-scheme: light) {
+        :host { --sp-backdrop: rgba(255, 255, 255, 0.55); }
+      }
       .backdrop {
         position: fixed;
         inset: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        background: rgba(15, 17, 23, 0.55);
+        background: var(--sp-backdrop);
         -webkit-backdrop-filter: blur(2px);
         backdrop-filter: blur(2px);
       }
