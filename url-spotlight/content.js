@@ -185,7 +185,7 @@
       row.addEventListener("mousedown", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        onSelect(s, e.shiftKey);
+        onSelect(s, !e.shiftKey);
       });
       row.addEventListener("mouseenter", () => {
         selectedIdx = i;
@@ -439,7 +439,7 @@
       e.stopPropagation();
       if (e.key === "Enter") {
         e.preventDefault();
-        const newTab = e.shiftKey;
+        const newTab = !e.shiftKey;
         if (selectedIdx >= 0 && suggestions[selectedIdx]) {
           onSelect(suggestions[selectedIdx], newTab);
         } else if (mode !== "tabs") {
