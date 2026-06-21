@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pixel City</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      background: #2b2f3a url("pixelcity.png") center / cover no-repeat;
+    }
+    @media (prefers-color-scheme: light) {
+      body { background: #eef1f6 url("lightmode.jpg") center / cover no-repeat; }
+    }
+  </style>
+</head>
+<body>
+  <script src="content.js"></script>
+</body>
+</html>

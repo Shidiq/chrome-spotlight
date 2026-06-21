@@ -4,32 +4,25 @@
     google: { name: "Google", url: "https://www.google.com/search?q=" },
     brave: { name: "Brave", url: "https://search.brave.com/search?q=" },
     startpage: { name: "Startpage", url: "https://www.startpage.com/sp/search?query=" },
-    bing: { name: "Bing", url: "https://www.bing.com/search?q=" }
+    bing: { name: "Bing", url: "https://www.bing.com/search?q=" },
   };
   const DEFAULT_ENGINE = "duckduckgo";
 
-  let hostEl = null;
+  const params = new URLSearchParams(location.search);
+  const originTabId = parseInt(params.get("originTabId")) || null;
+  const cmd = params.get("cmd") || "toggle-spotlight";
+  const mode = cmd === "switch-tabs" ? "tabs" : "url";
+
   let suggestionsEl = null;
   let suggestions = [];
   let selectedIdx = -1;
   let debounceTimer = null;
   let lastQueryId = 0;
   let searchEngine = DEFAULT_ENGINE;
-  let loadingAnimation = true;
-  let mode = "url";
   let allTabs = [];
 
-  chrome.storage.sync.get(
-    { searchEngine: DEFAULT_ENGINE, loadingAnimation: true },
-    (r) => {
-      searchEngine = r.searchEngine;
-      loadingAnimation = r.loadingAnimation;
-    }
-  );
-  chrome.storage.onChanged.addListener((c, area) => {
-    if (area !== "sync") return;
-    if (c.searchEngine) searchEngine = c.searchEngine.newValue;
-    if (c.loadingAnimation) loadingAnimation = c.loadingAnimation.newValue;
+  chrome.storage.sync.get({ searchEngine: DEFAULT_ENGINE }, (r) => {
+    searchEngine = r.searchEngine;
   });
 
   function resolveQuery(raw) {
@@ -41,42 +34,20 @@
     return engine.url + encodeURIComponent(trimmed);
   }
 
-  function close() {
-    if (!hostEl) return;
-    hostEl.remove();
-    hostEl = null;
-    suggestionsEl = null;
-    suggestions = [];
-    selectedIdx = -1;
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-      debounceTimer = null;
-    }
-  }
-
   function navigate(url, newTab) {
-    close();
-    // Same-tab navigation reloads this page — show the loader immediately to
-    // bridge the wait before the destination's document_start fires. New-tab
-    // navigation leaves the current page untouched, so no loader.
-    if (!newTab && loadingAnimation && window.__spotlightLoader) {
-      window.__spotlightLoader.show();
-      // Safety net: if navigation fails, don't leave a stuck overlay.
-      setTimeout(() => {
-        if (window.__spotlightLoader) window.__spotlightLoader.hide();
-      }, 8000);
-    }
-    const type = newTab ? "OPEN_NEW_TAB" : "OPEN_CURRENT_TAB";
-    chrome.runtime.sendMessage({ type, url }, () => {
-      void chrome.runtime.lastError;
-    });
+    chrome.runtime.sendMessage(
+      { type: "POPUP_NAVIGATE", url, newTab: !!newTab, originTabId },
+      () => { void chrome.runtime.lastError; }
+    );
+    // background closes the window after updating the tab
   }
 
   function activateTab(tabId, windowId) {
-    close();
-    chrome.runtime.sendMessage({ type: "ACTIVATE_TAB", tabId, windowId }, () => {
-      void chrome.runtime.lastError;
-    });
+    chrome.runtime.sendMessage(
+      { type: "POPUP_ACTIVATE_TAB", tabId, windowId },
+      () => { void chrome.runtime.lastError; }
+    );
+    // background closes the window after activating the tab
   }
 
   function onSelect(s, newTab) {
@@ -85,19 +56,15 @@
     else navigate(s.url, newTab);
   }
 
-  // Case-insensitive subsequence match. Returns a score (higher is better),
-  // or -1 if not every query char is found in order.
   function fuzzyScore(query, text) {
     if (!query) return 0;
     const q = query.toLowerCase();
     const t = (text || "").toLowerCase();
-    let qi = 0;
-    let score = 0;
-    let prevIdx = -1;
+    let qi = 0, score = 0, prevIdx = -1;
     for (let ti = 0; ti < t.length && qi < q.length; ti++) {
       if (t[ti] === q[qi]) {
-        score += prevIdx === ti - 1 ? 3 : 1; // contiguous-run bonus
-        if (ti === 0) score += 2; // start-of-string boost
+        score += prevIdx === ti - 1 ? 3 : 1;
+        if (ti === 0) score += 2;
         prevIdx = ti;
         qi++;
       }
@@ -137,13 +104,11 @@
   function renderSuggestions() {
     if (!suggestionsEl) return;
     suggestionsEl.innerHTML = "";
-
     if (suggestions.length === 0) {
       suggestionsEl.style.display = "none";
       return;
     }
     suggestionsEl.style.display = "block";
-
     suggestions.forEach((s, i) => {
       const row = document.createElement("div");
       row.className = "row" + (i === selectedIdx ? " selected" : "");
@@ -162,21 +127,17 @@
       } else {
         icon = document.createElement("span");
         icon.className = "icon";
-        icon.textContent =
-          s.type === "tab" ? "▢" : s.type === "bookmark" ? "★" : "↻";
+        icon.textContent = s.type === "tab" ? "▢" : s.type === "bookmark" ? "★" : "↻";
       }
 
       const text = document.createElement("div");
       text.className = "text";
-
       const title = document.createElement("div");
       title.className = "title";
       title.textContent = s.title;
-
       const url = document.createElement("div");
       url.className = "url";
       url.textContent = s.url;
-
       text.appendChild(title);
       text.appendChild(url);
       row.appendChild(icon);
@@ -184,40 +145,32 @@
 
       row.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        e.stopPropagation();
         onSelect(s, !e.shiftKey);
       });
       row.addEventListener("mouseenter", () => {
         selectedIdx = i;
         updateSelectionHighlight();
       });
-
       suggestionsEl.appendChild(row);
     });
   }
 
   function updateSelectionHighlight() {
     if (!suggestionsEl) return;
-    const rows = suggestionsEl.querySelectorAll(".row");
-    rows.forEach((r, i) => {
+    suggestionsEl.querySelectorAll(".row").forEach((r, i) => {
       r.classList.toggle("selected", i === selectedIdx);
     });
   }
 
   function requestSuggestions(query) {
     const myId = ++lastQueryId;
-    console.log("[spotlight content] sending query:", query);
-    chrome.runtime.sendMessage(
-      { type: "SEARCH_SUGGESTIONS", query },
-      (response) => {
-        const err = chrome.runtime.lastError;
-        console.log("[spotlight content] response:", response, "err:", err);
-        if (myId !== lastQueryId) return;
-        suggestions = (response && response.suggestions) || [];
-        selectedIdx = -1;
-        renderSuggestions();
-      }
-    );
+    chrome.runtime.sendMessage({ type: "SEARCH_SUGGESTIONS", query }, (response) => {
+      void chrome.runtime.lastError;
+      if (myId !== lastQueryId) return;
+      suggestions = (response && response.suggestions) || [];
+      selectedIdx = -1;
+      renderSuggestions();
+    });
   }
 
   function onInputChange(value) {
@@ -237,23 +190,10 @@
     debounceTimer = setTimeout(() => requestSuggestions(trimmed), 80);
   }
 
-  function open(openMode) {
-    if (hostEl) return;
-    mode = openMode === "tabs" ? "tabs" : "url";
-    allTabs = [];
-
-    hostEl = document.createElement("div");
-    hostEl.style.all = "initial";
-    hostEl.style.position = "fixed";
-    hostEl.style.inset = "0";
-    hostEl.style.zIndex = "2147483647";
-    hostEl.style.pointerEvents = "none";
-
-    const shadow = hostEl.attachShadow({ mode: "closed" });
-
+  function mount() {
     const style = document.createElement("style");
     style.textContent = `
-      :host {
+      :root {
         --sp-bg: #1e1e1e;
         --sp-text: #ffffff;
         --sp-text-secondary: #e0e0e0;
@@ -261,10 +201,9 @@
         --sp-placeholder: #666666;
         --sp-selected-bg: rgba(255, 255, 255, 0.08);
         --sp-border: rgba(255, 255, 255, 0.08);
-        --sp-panel-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
       }
       @media (prefers-color-scheme: light) {
-        :host {
+        :root {
           --sp-bg: #ffffff;
           --sp-text: #1a1a1a;
           --sp-text-secondary: #2c2c2c;
@@ -272,35 +211,17 @@
           --sp-placeholder: #9aa0aa;
           --sp-selected-bg: rgba(0, 0, 0, 0.06);
           --sp-border: rgba(0, 0, 0, 0.1);
-          --sp-panel-shadow: 0 20px 60px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.08);
         }
       }
-      :host, * { box-sizing: border-box; }
-      .backdrop {
-        position: fixed;
-        inset: 0;
-        background: transparent;
-        pointer-events: auto;
+      * { box-sizing: border-box; }
+      body {
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--sp-bg);
+        color: var(--sp-text);
+        overflow: hidden;
       }
       .panel {
-        position: fixed;
-        top: 28vh;
-        left: 50%;
-        transform: translateX(-50%) translateY(-4px);
-        width: 560px;
-        max-width: calc(100vw - 32px);
         padding: 16px 20px;
-        background: var(--sp-bg);
-        border-radius: 14px;
-        box-shadow: var(--sp-panel-shadow);
-        opacity: 0;
-        transition: opacity 100ms ease-out, transform 100ms ease-out;
-        pointer-events: auto;
-        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-      .panel.visible {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0);
       }
       input.spotlight-input {
         width: 100%;
@@ -313,9 +234,7 @@
         margin: 0;
         caret-color: var(--sp-text);
       }
-      input.spotlight-input::placeholder {
-        color: var(--sp-placeholder);
-      }
+      input.spotlight-input::placeholder { color: var(--sp-placeholder); }
       .suggestions {
         display: none;
         margin-top: 12px;
@@ -328,14 +247,12 @@
         display: flex;
         align-items: center;
         gap: 12px;
-        padding: 8px 8px;
+        padding: 8px;
         border-radius: 8px;
         cursor: pointer;
         color: var(--sp-text-secondary);
       }
-      .row.selected {
-        background: var(--sp-selected-bg);
-      }
+      .row.selected { background: var(--sp-selected-bg); }
       .icon {
         flex: 0 0 auto;
         width: 18px;
@@ -343,6 +260,7 @@
         font-size: 13px;
         color: var(--sp-muted);
       }
+      .row.selected .icon { color: var(--sp-text); }
       .favicon {
         flex: 0 0 auto;
         width: 16px;
@@ -350,13 +268,7 @@
         border-radius: 3px;
         object-fit: contain;
       }
-      .row.selected .icon {
-        color: var(--sp-text);
-      }
-      .text {
-        flex: 1 1 auto;
-        min-width: 0;
-      }
+      .text { flex: 1 1 auto; min-width: 0; }
       .title {
         font-size: 13px;
         color: var(--sp-text);
@@ -376,13 +288,10 @@
         margin-top: 10px;
         font-size: 12px;
         color: var(--sp-muted);
-        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         user-select: none;
       }
     `;
-
-    const backdrop = document.createElement("div");
-    backdrop.className = "backdrop";
+    document.head.appendChild(style);
 
     const panel = document.createElement("div");
     panel.className = "panel";
@@ -390,53 +299,30 @@
     const input = document.createElement("input");
     input.type = "text";
     input.className = "spotlight-input";
-    input.placeholder =
-      mode === "tabs" ? "Switch to tab..." : "Search or enter URL...";
+    input.placeholder = mode === "tabs" ? "Switch to tab..." : "Search or enter URL...";
     input.autocomplete = "off";
     input.spellcheck = false;
 
     suggestionsEl = document.createElement("div");
     suggestionsEl.className = "suggestions";
 
-    const hint = document.createElement("div");
-    hint.className = "hint";
-    hint.textContent =
-      mode === "tabs"
-        ? "↵ switch  ·  ↑↓ pick  ·  esc close"
-        : "↵ open  ·  ⇧↵ new tab  ·  ↑↓ pick  ·  esc close";
-
     panel.appendChild(input);
     panel.appendChild(suggestionsEl);
-    panel.appendChild(hint);
-    shadow.appendChild(style);
-    shadow.appendChild(backdrop);
-    shadow.appendChild(panel);
-    document.documentElement.appendChild(hostEl);
+    document.body.appendChild(panel);
 
-    requestAnimationFrame(() => panel.classList.add("visible"));
-    setTimeout(() => input.focus(), 0);
+    input.focus();
 
     if (mode === "tabs") {
       chrome.runtime.sendMessage({ type: "GET_TABS" }, (response) => {
         void chrome.runtime.lastError;
-        if (!hostEl || mode !== "tabs") return;
         allTabs = (response && response.tabs) || [];
         filterTabs("");
       });
     }
 
-    backdrop.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      close();
-    });
-
-    panel.addEventListener("mousedown", (e) => e.stopPropagation());
-
     input.addEventListener("input", () => onInputChange(input.value));
 
     input.addEventListener("keydown", (e) => {
-      e.stopPropagation();
       if (e.key === "Enter") {
         e.preventDefault();
         const newTab = !e.shiftKey;
@@ -448,37 +334,20 @@
         }
       } else if (e.key === "Escape") {
         e.preventDefault();
-        close();
+        window.close();
       } else if (e.key === "ArrowDown") {
-        if (suggestions.length === 0) return;
+        if (!suggestions.length) return;
         e.preventDefault();
         selectedIdx = (selectedIdx + 1) % suggestions.length;
         updateSelectionHighlight();
       } else if (e.key === "ArrowUp") {
-        if (suggestions.length === 0) return;
+        if (!suggestions.length) return;
         e.preventDefault();
-        selectedIdx =
-          selectedIdx <= 0 ? suggestions.length - 1 : selectedIdx - 1;
+        selectedIdx = selectedIdx <= 0 ? suggestions.length - 1 : selectedIdx - 1;
         updateSelectionHighlight();
       }
     });
-
-    input.addEventListener("keyup", (e) => e.stopPropagation());
-    input.addEventListener("keypress", (e) => e.stopPropagation());
   }
 
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (!msg) return;
-    let requestedMode;
-    if (msg.type === "TOGGLE_SPOTLIGHT") requestedMode = "url";
-    else if (msg.type === "TOGGLE_TAB_SWITCHER") requestedMode = "tabs";
-    else return;
-
-    if (hostEl && mode === requestedMode) {
-      close();
-    } else {
-      if (hostEl) close();
-      open(requestedMode);
-    }
-  });
+  document.addEventListener("DOMContentLoaded", mount);
 })();
