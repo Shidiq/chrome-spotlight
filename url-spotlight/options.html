@@ -80,6 +80,38 @@
       transition: opacity 0.2s;
     }
     .status.show { opacity: 1; }
+    .shortcut-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 18px;
+    }
+    .shortcut-btn {
+      flex: 1 1 auto;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--sp-card-border);
+      background: var(--sp-page-bg);
+      color: var(--sp-text);
+      font-size: 13px;
+      text-align: center;
+      cursor: pointer;
+    }
+    .shortcut-btn.recording {
+      border-color: var(--sp-accent);
+      color: var(--sp-accent);
+    }
+    .shortcut-reset {
+      flex: 0 0 auto;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--sp-card-border);
+      background: transparent;
+      color: var(--sp-sub);
+      font-size: 12px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -92,6 +124,11 @@
       <span>Page loading animation</span>
       <input type="checkbox" id="loadingAnim">
     </label>
+    <label>Task View tab switcher</label>
+    <div class="shortcut-row">
+      <button type="button" class="shortcut-btn" id="taskViewShortcutBtn">⌥ Tab</button>
+      <button type="button" class="shortcut-reset" id="taskViewShortcutReset">Reset</button>
+    </div>
     <div class="status" id="status">Saved</div>
   </div>
   <script src="options.js"></script>

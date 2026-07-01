@@ -7,6 +7,7 @@
     bing: { name: "Bing", url: "https://www.bing.com/search?q=" }
   };
   const DEFAULT_ENGINE = "duckduckgo";
+  const DEFAULT_TASKVIEW_SHORTCUT = { alt: true, ctrl: false, shift: false, meta: false, key: "Tab" };
 
   let hostEl = null;
   let suggestionsEl = null;
@@ -18,18 +19,25 @@
   let loadingAnimation = true;
   let mode = "url";
   let allTabs = [];
+  let taskViewShortcut = DEFAULT_TASKVIEW_SHORTCUT;
 
   chrome.storage.sync.get(
-    { searchEngine: DEFAULT_ENGINE, loadingAnimation: true },
+    {
+      searchEngine: DEFAULT_ENGINE,
+      loadingAnimation: true,
+      taskViewShortcut: DEFAULT_TASKVIEW_SHORTCUT,
+    },
     (r) => {
       searchEngine = r.searchEngine;
       loadingAnimation = r.loadingAnimation;
+      taskViewShortcut = r.taskViewShortcut;
     }
   );
   chrome.storage.onChanged.addListener((c, area) => {
     if (area !== "sync") return;
     if (c.searchEngine) searchEngine = c.searchEngine.newValue;
     if (c.loadingAnimation) loadingAnimation = c.loadingAnimation.newValue;
+    if (c.taskViewShortcut) taskViewShortcut = c.taskViewShortcut.newValue;
   });
 
   function resolveQuery(raw) {
@@ -480,5 +488,241 @@
       if (hostEl) close();
       open(requestedMode);
     }
+  });
+
+  // --- Task View tab switcher (hold modifier, tap key to cycle, release to switch) ---
+
+  let taskViewActive = false;
+  let taskViewTabs = [];
+  let taskViewIndex = -1;
+  let taskViewHostEl = null;
+  let taskViewCardsEl = null;
+
+  function matchesTaskViewShortcut(e) {
+    const cfg = taskViewShortcut;
+    if (!cfg || !cfg.key) return false;
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (key !== cfg.key) return false;
+    if (e.altKey !== !!cfg.alt) return false;
+    if (e.ctrlKey !== !!cfg.ctrl) return false;
+    if (e.metaKey !== !!cfg.meta) return false;
+    return true; // shift is treated as a direction modifier, not matched here
+  }
+
+  function isTaskViewModifierKey(key) {
+    const cfg = taskViewShortcut;
+    return (
+      (cfg.alt && key === "Alt") ||
+      (cfg.ctrl && key === "Control") ||
+      (cfg.meta && key === "Meta")
+    );
+  }
+
+  function startTaskView() {
+    chrome.runtime.sendMessage({ type: "GET_TABS" }, (response) => {
+      void chrome.runtime.lastError;
+      const tabs = (response && response.tabs) || [];
+      if (tabs.length < 2) return;
+      taskViewTabs = tabs;
+      taskViewIndex = 1;
+      taskViewActive = true;
+      renderTaskView();
+    });
+  }
+
+  function advanceTaskView(delta) {
+    if (!taskViewTabs.length) return;
+    taskViewIndex =
+      (taskViewIndex + delta + taskViewTabs.length) % taskViewTabs.length;
+    renderTaskView();
+  }
+
+  function closeTaskView() {
+    taskViewActive = false;
+    taskViewTabs = [];
+    taskViewIndex = -1;
+    if (taskViewHostEl) {
+      taskViewHostEl.remove();
+      taskViewHostEl = null;
+      taskViewCardsEl = null;
+    }
+  }
+
+  function commitTaskView() {
+    if (!taskViewActive) return;
+    const chosen = taskViewTabs[taskViewIndex];
+    closeTaskView();
+    if (chosen && !chosen.active) {
+      chrome.runtime.sendMessage(
+        { type: "ACTIVATE_TAB", tabId: chosen.tabId, windowId: chosen.windowId },
+        () => void chrome.runtime.lastError
+      );
+    }
+  }
+
+  function renderTaskView() {
+    if (!taskViewHostEl) {
+      taskViewHostEl = document.createElement("div");
+      taskViewHostEl.style.all = "initial";
+      taskViewHostEl.style.position = "fixed";
+      taskViewHostEl.style.inset = "0";
+      taskViewHostEl.style.zIndex = "2147483647";
+      taskViewHostEl.style.pointerEvents = "none";
+
+      const shadow = taskViewHostEl.attachShadow({ mode: "closed" });
+
+      const style = document.createElement("style");
+      style.textContent = `
+        :host {
+          --sp-bg: #1e1e1e;
+          --sp-text: #ffffff;
+          --sp-muted: #888888;
+          --sp-card-bg: rgba(255, 255, 255, 0.06);
+          --sp-card-selected-bg: rgba(255, 255, 255, 0.16);
+          --sp-panel-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+        }
+        @media (prefers-color-scheme: light) {
+          :host {
+            --sp-bg: #ffffff;
+            --sp-text: #1a1a1a;
+            --sp-muted: #6b7280;
+            --sp-card-bg: rgba(0, 0, 0, 0.04);
+            --sp-card-selected-bg: rgba(0, 0, 0, 0.1);
+            --sp-panel-shadow: 0 20px 60px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.08);
+          }
+        }
+        :host, * { box-sizing: border-box; }
+        .panel {
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          display: flex;
+          gap: 10px;
+          max-width: calc(100vw - 80px);
+          overflow-x: auto;
+          padding: 20px;
+          background: var(--sp-bg);
+          border-radius: 16px;
+          box-shadow: var(--sp-panel-shadow);
+          pointer-events: auto;
+          font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        .card {
+          flex: 0 0 auto;
+          width: 120px;
+          padding: 14px 10px;
+          border-radius: 10px;
+          background: var(--sp-card-bg);
+          border: 2px solid transparent;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+        }
+        .card.selected {
+          background: var(--sp-card-selected-bg);
+          border-color: var(--sp-text);
+        }
+        .favicon {
+          width: 32px;
+          height: 32px;
+          border-radius: 6px;
+          object-fit: contain;
+        }
+        .icon {
+          width: 32px;
+          height: 32px;
+          line-height: 32px;
+          text-align: center;
+          font-size: 20px;
+          color: var(--sp-muted);
+        }
+        .title {
+          width: 100%;
+          font-size: 12px;
+          color: var(--sp-text);
+          text-align: center;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+      `;
+
+      taskViewCardsEl = document.createElement("div");
+      taskViewCardsEl.className = "panel";
+
+      shadow.appendChild(style);
+      shadow.appendChild(taskViewCardsEl);
+      document.documentElement.appendChild(taskViewHostEl);
+    }
+
+    taskViewCardsEl.innerHTML = "";
+    taskViewTabs.forEach((t, i) => {
+      const card = document.createElement("div");
+      card.className = "card" + (i === taskViewIndex ? " selected" : "");
+
+      let icon;
+      if (t.favIconUrl) {
+        icon = document.createElement("img");
+        icon.className = "favicon";
+        icon.src = t.favIconUrl;
+        icon.addEventListener("error", () => {
+          const fallback = document.createElement("span");
+          fallback.className = "icon";
+          fallback.textContent = "▢";
+          icon.replaceWith(fallback);
+        });
+      } else {
+        icon = document.createElement("span");
+        icon.className = "icon";
+        icon.textContent = "▢";
+      }
+
+      const title = document.createElement("div");
+      title.className = "title";
+      title.textContent = t.title || t.url;
+
+      card.appendChild(icon);
+      card.appendChild(title);
+      taskViewCardsEl.appendChild(card);
+    });
+
+    const selected = taskViewCardsEl.children[taskViewIndex];
+    if (selected && selected.scrollIntoView) {
+      selected.scrollIntoView({ block: "nearest", inline: "center" });
+    }
+  }
+
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (hostEl) return; // spotlight/tab-search overlay already open, don't conflict
+      if (taskViewActive && e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeTaskView();
+        return;
+      }
+      if (!matchesTaskViewShortcut(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!taskViewActive) startTaskView();
+      else advanceTaskView(e.shiftKey ? -1 : 1);
+    },
+    true
+  );
+
+  document.addEventListener(
+    "keyup",
+    (e) => {
+      if (!taskViewActive) return;
+      if (isTaskViewModifierKey(e.key)) commitTaskView();
+    },
+    true
+  );
+
+  window.addEventListener("blur", () => {
+    if (taskViewActive) commitTaskView();
   });
 })();
