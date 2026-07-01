@@ -505,8 +505,9 @@
     if (key !== cfg.key) return false;
     if (e.altKey !== !!cfg.alt) return false;
     if (e.ctrlKey !== !!cfg.ctrl) return false;
+    if (e.shiftKey !== !!cfg.shift) return false;
     if (e.metaKey !== !!cfg.meta) return false;
-    return true; // shift is treated as a direction modifier, not matched here
+    return true;
   }
 
   function isTaskViewModifierKey(key) {
@@ -514,6 +515,7 @@
     return (
       (cfg.alt && key === "Alt") ||
       (cfg.ctrl && key === "Control") ||
+      (cfg.shift && key === "Shift") ||
       (cfg.meta && key === "Meta")
     );
   }
@@ -698,17 +700,25 @@
     "keydown",
     (e) => {
       if (hostEl) return; // spotlight/tab-search overlay already open, don't conflict
-      if (taskViewActive && e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        closeTaskView();
-        return;
+      if (taskViewActive) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          closeTaskView();
+          return;
+        }
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.preventDefault();
+          e.stopPropagation();
+          advanceTaskView(e.key === "ArrowLeft" ? -1 : 1);
+          return;
+        }
       }
       if (!matchesTaskViewShortcut(e)) return;
       e.preventDefault();
       e.stopPropagation();
       if (!taskViewActive) startTaskView();
-      else advanceTaskView(e.shiftKey ? -1 : 1);
+      else advanceTaskView(1);
     },
     true
   );

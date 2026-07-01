@@ -82,14 +82,10 @@ function recordShortcut(e) {
     taskViewShortcutBtn.textContent = "Need a modifier key…";
     return;
   }
-  if (e.shiftKey) {
-    taskViewShortcutBtn.textContent = "Shift is reserved for reverse — try without Shift";
-    return;
-  }
   activeShortcut = {
     alt: e.altKey,
     ctrl: e.ctrlKey,
-    shift: false,
+    shift: e.shiftKey,
     meta: e.metaKey,
     key: e.key.length === 1 ? e.key.toLowerCase() : e.key,
   };
