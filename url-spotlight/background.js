@@ -14,10 +14,20 @@ function isRestrictedUrl(url) {
   );
 }
 
-function sendToggle(tabId, msgType) {
-  chrome.tabs.sendMessage(tabId, { type: msgType }, () => {
+function sendToggle(tabId, msgType, command) {
+  chrome.tabs.sendMessage(tabId, { type: msgType }, (res) => {
     const err = chrome.runtime.lastError;
-    if (err) console.log("[spotlight bg] toggle err:", err.message);
+    // Content script ACKs with {ok:true}. Without the ACK check, a listener
+    // that handles the message but sends no response still sets lastError
+    // ("message port closed") and would wrongly trigger the fallback.
+    if (err || !(res && res.ok)) {
+      // No content script in this tab (Web Store, tab loaded before install…)
+      console.log(
+        "[spotlight bg] toggle failed, using popup fallback:",
+        err ? err.message : "no ack"
+      );
+      openPopupFallback(command, tabId);
+    }
   });
 }
 
@@ -58,7 +68,7 @@ chrome.commands.onCommand.addListener((command, tab) => {
     if (isRestrictedUrl(t.url)) {
       openPopupFallback(command, t.id);
     } else {
-      sendToggle(t.id, msgType);
+      sendToggle(t.id, msgType, command);
     }
   };
 
@@ -137,9 +147,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg && msg.type === "GET_TABS") {
+    const popupUrl = chrome.runtime.getURL("popup.html");
     chrome.tabs.query({}, (tabs) => {
       const list = (tabs || [])
-        .filter((t) => t.id != null)
+        .filter((t) => t.id != null && !(t.url || "").startsWith(popupUrl))
         .map((t) => ({
           tabId: t.id,
           windowId: t.windowId,

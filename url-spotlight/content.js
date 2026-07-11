@@ -411,7 +411,7 @@
     hint.textContent =
       mode === "tabs"
         ? "↵ switch  ·  ↑↓ pick  ·  esc close"
-        : "↵ open  ·  ⇧↵ new tab  ·  ↑↓ pick  ·  esc close";
+        : "↵ new tab  ·  ⇧↵ this page  ·  ↑↓ pick  ·  esc close";
 
     panel.appendChild(input);
     panel.appendChild(suggestionsEl);
@@ -475,7 +475,7 @@
     input.addEventListener("keypress", (e) => e.stopPropagation());
   }
 
-  chrome.runtime.onMessage.addListener((msg) => {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg) return;
     let requestedMode;
     if (msg.type === "TOGGLE_SPOTLIGHT") requestedMode = "url";
@@ -488,11 +488,15 @@
       if (hostEl) close();
       open(requestedMode);
     }
+    // ACK so background knows the overlay handled it and skips popup fallback.
+    sendResponse({ ok: true });
   });
 
   // --- Task View tab switcher (hold modifier, tap key to cycle, release to switch) ---
 
   let taskViewActive = false;
+  let taskViewPending = false; // GET_TABS request in flight
+  let taskViewCommitOnArrival = false; // modifier released before tabs arrived
   let taskViewTabs = [];
   let taskViewIndex = -1;
   let taskViewHostEl = null;
@@ -521,14 +525,22 @@
   }
 
   function startTaskView() {
+    if (taskViewPending) return;
+    taskViewPending = true;
+    taskViewCommitOnArrival = false;
     chrome.runtime.sendMessage({ type: "GET_TABS" }, (response) => {
       void chrome.runtime.lastError;
+      if (!taskViewPending) return; // cancelled (Escape/blur) before tabs arrived
+      taskViewPending = false;
       const tabs = (response && response.tabs) || [];
       if (tabs.length < 2) return;
       taskViewTabs = tabs;
       taskViewIndex = 1;
       taskViewActive = true;
-      renderTaskView();
+      // Quick tap: modifier already released — switch immediately, no overlay.
+      if (taskViewCommitOnArrival) commitTaskView();
+      else renderTaskView();
+      taskViewCommitOnArrival = false;
     });
   }
 
@@ -700,14 +712,16 @@
     "keydown",
     (e) => {
       if (hostEl) return; // spotlight/tab-search overlay already open, don't conflict
-      if (taskViewActive) {
+      if (taskViewActive || taskViewPending) {
         if (e.key === "Escape") {
           e.preventDefault();
           e.stopPropagation();
+          taskViewPending = false;
+          taskViewCommitOnArrival = false;
           closeTaskView();
           return;
         }
-        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        if (taskViewActive && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
           e.preventDefault();
           e.stopPropagation();
           advanceTaskView(e.key === "ArrowLeft" ? -1 : 1);
@@ -726,13 +740,16 @@
   document.addEventListener(
     "keyup",
     (e) => {
-      if (!taskViewActive) return;
-      if (isTaskViewModifierKey(e.key)) commitTaskView();
+      if (!isTaskViewModifierKey(e.key)) return;
+      if (taskViewActive) commitTaskView();
+      else if (taskViewPending) taskViewCommitOnArrival = true;
     },
     true
   );
 
   window.addEventListener("blur", () => {
+    taskViewPending = false;
+    taskViewCommitOnArrival = false;
     if (taskViewActive) commitTaskView();
   });
 })();

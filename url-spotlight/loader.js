@@ -99,5 +99,11 @@
     setTimeout(() => el.remove(), 280);
   }
 
+  // BFCache restore can revive a page frozen with the overlay still in the
+  // DOM (e.g. spotlight same-tab navigation, then Back) — clear it.
+  window.addEventListener("pageshow", (e) => {
+    if (e.persisted) hide();
+  });
+
   window.__spotlightLoader = { show, hide, isShown: () => !!hostEl };
 })();
