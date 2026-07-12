@@ -1,4 +1,10 @@
 (() => {
+  // On-demand injection (background retry) can race the manifest's
+  // document_idle injection — a second copy would register a duplicate
+  // message listener and instantly open+close the overlay.
+  if (window.__spotlightContent) return;
+  window.__spotlightContent = true;
+
   const SEARCH_ENGINES = {
     duckduckgo: { name: "DuckDuckGo", url: "https://duckduckgo.com/?q=" },
     google: { name: "Google", url: "https://www.google.com/search?q=" },
@@ -10,6 +16,7 @@
   const DEFAULT_TASKVIEW_SHORTCUT = { alt: true, ctrl: false, shift: false, meta: false, key: "Tab" };
 
   let hostEl = null;
+  let inputEl = null;
   let suggestionsEl = null;
   let suggestions = [];
   let selectedIdx = -1;
@@ -53,6 +60,7 @@
     if (!hostEl) return;
     hostEl.remove();
     hostEl = null;
+    inputEl = null;
     suggestionsEl = null;
     suggestions = [];
     selectedIdx = -1;
@@ -422,6 +430,7 @@
     document.documentElement.appendChild(hostEl);
 
     requestAnimationFrame(() => panel.classList.add("visible"));
+    inputEl = input;
     setTimeout(() => input.focus(), 0);
 
     if (mode === "tabs") {
@@ -752,4 +761,34 @@
     taskViewCommitOnArrival = false;
     if (taskViewActive) commitTaskView();
   });
+
+  // Reserved browser shortcuts (Cmd/Ctrl+T) never reach extension commands on
+  // chrome-extension:// pages — the native "new tab" wins there. Every new tab
+  // lands on this page, so auto-open spotlight to keep the shortcut useful:
+  // Cmd+T on any restricted page → new tab → spotlight, ready to type.
+  if (
+    typeof chrome !== "undefined" &&
+    chrome.runtime &&
+    chrome.runtime.getURL &&
+    location.href === chrome.runtime.getURL("newtab.html")
+  ) {
+    open("url");
+
+    // Chrome (27+) refuses to let an NTP page steal focus from the omnibox,
+    // so input.focus() during load is ignored at the browser level. Retry
+    // briefly in case the browser does hand focus over, and re-grab the
+    // input whenever browser focus enters the page (first Tab press/click).
+    const focusOverlayInput = () => {
+      if (inputEl) inputEl.focus();
+    };
+    const started = Date.now();
+    (function retryFocus() {
+      if (!inputEl) return;
+      focusOverlayInput();
+      if (!document.hasFocus() && Date.now() - started < 1000) {
+        requestAnimationFrame(retryFocus);
+      }
+    })();
+    window.addEventListener("focus", () => setTimeout(focusOverlayInput, 0));
+  }
 })();

@@ -14,20 +14,38 @@ function isRestrictedUrl(url) {
   );
 }
 
-function sendToggle(tabId, msgType, command) {
+function sendToggle(tabId, msgType, command, isRetry) {
   chrome.tabs.sendMessage(tabId, { type: msgType }, (res) => {
     const err = chrome.runtime.lastError;
     // Content script ACKs with {ok:true}. Without the ACK check, a listener
     // that handles the message but sends no response still sets lastError
     // ("message port closed") and would wrongly trigger the fallback.
-    if (err || !(res && res.ok)) {
-      // No content script in this tab (Web Store, tab loaded before install…)
+    if (!err && res && res.ok) return;
+    if (isRetry) {
       console.log(
-        "[spotlight bg] toggle failed, using popup fallback:",
+        "[spotlight bg] toggle failed after inject, using popup fallback:",
         err ? err.message : "no ack"
       );
       openPopupFallback(command, tabId);
+      return;
     }
+    // No content script in this tab (tab loaded before install, file://,
+    // page still loading…) — inject on demand, then retry once.
+    chrome.scripting.executeScript(
+      { target: { tabId }, files: ["loader.js", "content.js"] },
+      () => {
+        if (chrome.runtime.lastError) {
+          // Page Chrome refuses to inject into (chrome://, Web Store…)
+          console.log(
+            "[spotlight bg] inject failed, using popup fallback:",
+            chrome.runtime.lastError.message
+          );
+          openPopupFallback(command, tabId);
+          return;
+        }
+        sendToggle(tabId, msgType, command, true);
+      }
+    );
   });
 }
 
