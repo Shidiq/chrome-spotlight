@@ -318,7 +318,7 @@
         margin-top: 8px;
         border-top: 1px solid var(--sp-border);
         padding-top: 2px;
-        max-height: 380px;
+        max-height: calc(100vh - 88px);
         overflow-y: auto;
       }
       .section-header {
@@ -443,6 +443,20 @@
     panel.appendChild(searchField);
     panel.appendChild(suggestionsEl);
     document.body.appendChild(panel);
+
+    // Center on the screen (golden-ratio 600x373 content). The service
+    // worker can't see screen dimensions, so the popup repositions itself.
+    const CONTENT_W = 600;
+    const CONTENT_H = 373;
+    const TITLEBAR = 28;
+    const left = Math.round(screen.availLeft + (screen.availWidth - CONTENT_W) / 2);
+    const top =
+      Math.round(screen.availTop + (screen.availHeight - CONTENT_H) / 2) - TITLEBAR;
+    chrome.windows.update(
+      chrome.windows.WINDOW_ID_CURRENT,
+      { left, top, width: CONTENT_W, height: CONTENT_H + TITLEBAR, focused: true },
+      () => { void chrome.runtime.lastError; }
+    );
 
     input.focus();
 

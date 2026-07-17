@@ -56,7 +56,7 @@ function openPopupFallback(command, originTabId) {
   });
   const popupUrl = chrome.runtime.getURL("popup.html") + "?" + params.toString();
   const popupWidth = 600;
-  const popupContentHeight = 480;
+  const popupContentHeight = 373;
   // Push window up by titlebar height so only content is visible (frameless look)
   const titlebarHeight = 28;
   const popupHeight = popupContentHeight + titlebarHeight;
