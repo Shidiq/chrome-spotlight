@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "URL Spotlight",
   "version": "1.0.0",
-  "description": "Spotlight-style URL bar overlay. Press Ctrl+T to navigate or search from any page.",
+  "description": "Spotlight-style overlay to search open tabs, bookmarks, and history — or open any URL — from any page.",
   "permissions": ["activeTab", "tabs", "bookmarks", "history", "storage", "scripting"],
   "host_permissions": ["<all_urls>"],
   "icons": {
@@ -47,14 +47,14 @@
         "default": "Ctrl+T",
         "mac": "Command+T"
       },
-      "description": "Open URL Spotlight"
+      "description": "Open Spotlight"
     },
     "switch-tabs": {
       "suggested_key": {
         "default": "Ctrl+Shift+O",
         "mac": "Command+Shift+O"
       },
-      "description": "Switch to an open tab"
+      "description": "Open Spotlight (alternate shortcut)"
     }
   }
 }
