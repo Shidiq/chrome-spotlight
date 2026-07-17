@@ -94,7 +94,7 @@ function recordShortcut(e) {
 }
 
 function stopRecording() {
-  document.removeEventListener("keydown", recordShortcut, true);
+  window.removeEventListener("keydown", recordShortcut, true);
   taskViewShortcutBtn.classList.remove("recording");
   renderShortcutLabel(activeShortcut);
 }
@@ -102,7 +102,10 @@ function stopRecording() {
 taskViewShortcutBtn.addEventListener("click", () => {
   taskViewShortcutBtn.classList.add("recording");
   taskViewShortcutBtn.textContent = "Press keys…";
-  document.addEventListener("keydown", recordShortcut, true);
+  // Capture on window so this fires before content.js's document-level Task
+  // View listener; stopPropagation then keeps the overlay from opening while
+  // recording.
+  window.addEventListener("keydown", recordShortcut, true);
 });
 
 taskViewShortcutReset.addEventListener("click", () => {

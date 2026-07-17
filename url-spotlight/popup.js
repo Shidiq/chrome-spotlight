@@ -10,8 +10,7 @@
 
   const params = new URLSearchParams(location.search);
   const originTabId = parseInt(params.get("originTabId")) || null;
-  const cmd = params.get("cmd") || "toggle-spotlight";
-  const mode = cmd === "switch-tabs" ? "tabs" : "url";
+  // cmd param kept in the URL for compat; both commands open the unified UI.
 
   let suggestionsEl = null;
   let suggestions = [];
@@ -20,6 +19,9 @@
   let lastQueryId = 0;
   let searchEngine = DEFAULT_ENGINE;
   let allTabs = [];
+  let tabUrls = new Set();
+  let tabMatches = [];
+  let bhMatches = [];
 
   chrome.storage.sync.get({ searchEngine: DEFAULT_ENGINE }, (r) => {
     searchEngine = r.searchEngine;
@@ -83,22 +85,87 @@
     };
   }
 
-  function filterTabs(query) {
+  function getTabMatches(query) {
     const q = query.trim();
-    if (!q) {
-      suggestions = allTabs.map(toTabSuggestion);
-    } else {
-      suggestions = allTabs
-        .map((t) => ({
-          t,
-          score: Math.max(fuzzyScore(q, t.title), fuzzyScore(q, t.url)),
-        }))
-        .filter((x) => x.score >= 0)
-        .sort((a, b) => b.score - a.score)
-        .map((x) => toTabSuggestion(x.t));
-    }
-    selectedIdx = suggestions.length ? 0 : -1;
+    if (!q) return allTabs.slice(0, 8).map(toTabSuggestion);
+    return allTabs
+      .map((t) => ({
+        t,
+        score: Math.max(fuzzyScore(q, t.title), fuzzyScore(q, t.url)),
+      }))
+      .filter((x) => x.score >= 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6)
+      .map((x) => toTabSuggestion(x.t));
+  }
+
+  function rebuildSuggestions() {
+    suggestions = [...tabMatches, ...bhMatches];
+    if (selectedIdx >= suggestions.length) selectedIdx = suggestions.length - 1;
     renderSuggestions();
+  }
+
+  const ICON_SVGS = {
+    tab: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><ellipse cx="8" cy="8" rx="2.8" ry="6.2"/><path d="M2 8h12"/></svg>',
+    bookmark:
+      '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.7l1.9 3.9 4.3.6-3.1 3 .7 4.2L8 11.4l-3.8 2 .7-4.2-3.1-3 4.3-.6z"/></svg>',
+    history:
+      '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.5V8l2.4 1.6"/></svg>',
+  };
+
+  const BADGE_LABELS = { tab: "TAB", bookmark: "BOOKMARK", history: "HISTORY" };
+
+  function makeTypeIcon(type) {
+    const span = document.createElement("span");
+    span.className = "icon";
+    span.innerHTML = ICON_SVGS[type] || ICON_SVGS.history;
+    return span;
+  }
+
+  function appendRow(s, i) {
+    const row = document.createElement("div");
+    row.className = "row" + (i === selectedIdx ? " selected" : "");
+
+    let icon;
+    if (s.type === "tab" && s.favIconUrl) {
+      icon = document.createElement("img");
+      icon.className = "favicon";
+      icon.src = s.favIconUrl;
+      icon.addEventListener("error", () => {
+        icon.replaceWith(makeTypeIcon(s.type));
+      });
+    } else {
+      icon = makeTypeIcon(s.type);
+    }
+
+    const text = document.createElement("div");
+    text.className = "text";
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = s.title;
+    const url = document.createElement("div");
+    url.className = "url";
+    url.textContent = s.url;
+    text.appendChild(title);
+    text.appendChild(url);
+
+    const badge = document.createElement("span");
+    badge.className = "badge badge-" + s.type;
+    badge.textContent = BADGE_LABELS[s.type] || s.type.toUpperCase();
+
+    row.appendChild(icon);
+    row.appendChild(text);
+    row.appendChild(badge);
+
+    row.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      onSelect(s, !e.shiftKey);
+    });
+    row.addEventListener("mouseenter", () => {
+      selectedIdx = i;
+      updateSelectionHighlight();
+    });
+    suggestionsEl.appendChild(row);
   }
 
   function renderSuggestions() {
@@ -109,56 +176,25 @@
       return;
     }
     suggestionsEl.style.display = "block";
-    suggestions.forEach((s, i) => {
-      const row = document.createElement("div");
-      row.className = "row" + (i === selectedIdx ? " selected" : "");
 
-      let icon;
-      if (s.type === "tab" && s.favIconUrl) {
-        icon = document.createElement("img");
-        icon.className = "favicon";
-        icon.src = s.favIconUrl;
-        icon.addEventListener("error", () => {
-          const fallback = document.createElement("span");
-          fallback.className = "icon";
-          fallback.textContent = "▢";
-          icon.replaceWith(fallback);
-        });
-      } else {
-        icon = document.createElement("span");
-        icon.className = "icon";
-        icon.textContent = s.type === "tab" ? "▢" : s.type === "bookmark" ? "★" : "↻";
-      }
+    const renderSection = (label, items, offset) => {
+      if (!items.length) return;
+      const header = document.createElement("div");
+      header.className = "section-header";
+      header.textContent = label;
+      suggestionsEl.appendChild(header);
+      items.forEach((s, j) => appendRow(s, offset + j));
+    };
 
-      const text = document.createElement("div");
-      text.className = "text";
-      const title = document.createElement("div");
-      title.className = "title";
-      title.textContent = s.title;
-      const url = document.createElement("div");
-      url.className = "url";
-      url.textContent = s.url;
-      text.appendChild(title);
-      text.appendChild(url);
-      row.appendChild(icon);
-      row.appendChild(text);
-
-      row.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        onSelect(s, !e.shiftKey);
-      });
-      row.addEventListener("mouseenter", () => {
-        selectedIdx = i;
-        updateSelectionHighlight();
-      });
-      suggestionsEl.appendChild(row);
-    });
+    renderSection("Open Tabs", tabMatches, 0);
+    renderSection("Bookmarks & History", bhMatches, tabMatches.length);
   }
 
   function updateSelectionHighlight() {
     if (!suggestionsEl) return;
     suggestionsEl.querySelectorAll(".row").forEach((r, i) => {
       r.classList.toggle("selected", i === selectedIdx);
+      if (i === selectedIdx) r.scrollIntoView({ block: "nearest" });
     });
   }
 
@@ -167,26 +203,29 @@
     chrome.runtime.sendMessage({ type: "SEARCH_SUGGESTIONS", query }, (response) => {
       void chrome.runtime.lastError;
       if (myId !== lastQueryId) return;
-      suggestions = (response && response.suggestions) || [];
-      selectedIdx = -1;
-      renderSuggestions();
+      const items = (response && response.suggestions) || [];
+      // An already-open tab beats reloading the same URL from history.
+      bhMatches = items.filter((s) => !tabUrls.has(s.url));
+      rebuildSuggestions();
     });
   }
 
   function onInputChange(value) {
-    if (mode === "tabs") {
-      filterTabs(value);
-      return;
-    }
     if (debounceTimer) clearTimeout(debounceTimer);
     const trimmed = value.trim();
     if (!trimmed) {
       lastQueryId++;
-      suggestions = [];
-      selectedIdx = -1;
-      renderSuggestions();
+      bhMatches = [];
+      tabMatches = getTabMatches("");
+      selectedIdx = tabMatches.length ? 0 : -1;
+      rebuildSuggestions();
       return;
     }
+    tabMatches = getTabMatches(trimmed);
+    // No default selection while typing: plain Enter must keep resolving the
+    // raw query (URL / search engine) unless the user picks a row.
+    selectedIdx = -1;
+    rebuildSuggestions();
     debounceTimer = setTimeout(() => requestSuggestions(trimmed), 80);
   }
 
@@ -194,83 +233,133 @@
     const style = document.createElement("style");
     style.textContent = `
       :root {
-        --sp-bg: #1e1e1e;
+        --sp-bg: rgba(40, 40, 44, 1);
         --sp-text: #ffffff;
         --sp-text-secondary: #e0e0e0;
-        --sp-muted: #888888;
-        --sp-placeholder: #666666;
-        --sp-selected-bg: rgba(255, 255, 255, 0.08);
-        --sp-border: rgba(255, 255, 255, 0.08);
+        --sp-muted: rgba(235, 235, 245, 0.6);
+        --sp-placeholder: rgba(235, 235, 245, 0.35);
+        --sp-border: rgba(255, 255, 255, 0.1);
+        --sp-accent: #3b82f6;
+        --sp-on-accent: #ffffff;
+        --sp-badge-bg: rgba(255, 255, 255, 0.1);
+        --sp-badge-tab-bg: rgba(59, 130, 246, 0.28);
+        --sp-badge-tab-text: #9cc2ff;
       }
       @media (prefers-color-scheme: light) {
         :root {
-          --sp-bg: #ffffff;
-          --sp-text: #1a1a1a;
-          --sp-text-secondary: #2c2c2c;
-          --sp-muted: #6b7280;
-          --sp-placeholder: #9aa0aa;
-          --sp-selected-bg: rgba(0, 0, 0, 0.06);
-          --sp-border: rgba(0, 0, 0, 0.1);
+          --sp-bg: rgb(238, 238, 240);
+          --sp-text: #1d1d1f;
+          --sp-text-secondary: #1d1d1f;
+          --sp-muted: #6e6e73;
+          --sp-placeholder: #a1a1a6;
+          --sp-border: rgba(0, 0, 0, 0.08);
+          --sp-accent: #3478f6;
+          --sp-on-accent: #ffffff;
+          --sp-badge-bg: rgba(0, 0, 0, 0.07);
+          --sp-badge-tab-bg: rgba(52, 120, 246, 0.12);
+          --sp-badge-tab-text: #3478f6;
         }
       }
       * { box-sizing: border-box; }
       body {
-        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background: var(--sp-bg);
         color: var(--sp-text);
         overflow: hidden;
+        margin: 0;
       }
       .panel {
-        padding: 16px 20px;
+        padding: 10px;
+      }
+      .search-field {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+      }
+      .search-icon {
+        flex: 0 0 auto;
+        display: flex;
+        color: var(--sp-muted);
       }
       input.spotlight-input {
-        width: 100%;
+        flex: 1 1 auto;
+        min-width: 0;
         border: none;
         outline: none;
         background: transparent;
         color: var(--sp-text);
-        font: 20px ui-monospace, SFMono-Regular, Menlo, Monaco, "Courier New", monospace;
+        font: 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         padding: 0;
         margin: 0;
         caret-color: var(--sp-text);
       }
       input.spotlight-input::placeholder { color: var(--sp-placeholder); }
+      .close-btn {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--sp-muted);
+        cursor: pointer;
+        padding: 0;
+      }
+      .close-btn:hover {
+        background: var(--sp-badge-bg);
+        color: var(--sp-text);
+      }
       .suggestions {
         display: none;
-        margin-top: 12px;
+        margin-top: 8px;
         border-top: 1px solid var(--sp-border);
-        padding-top: 8px;
-        max-height: 320px;
+        padding-top: 2px;
+        max-height: calc(100vh - 88px);
         overflow-y: auto;
+      }
+      .section-header {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--sp-muted);
+        padding: 10px 10px 4px;
+        user-select: none;
       }
       .row {
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 8px;
+        gap: 10px;
+        padding: 7px 10px;
         border-radius: 8px;
         cursor: pointer;
         color: var(--sp-text-secondary);
       }
-      .row.selected { background: var(--sp-selected-bg); }
+      .row.selected { background: var(--sp-accent); }
       .icon {
         flex: 0 0 auto;
         width: 18px;
-        text-align: center;
-        font-size: 13px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         color: var(--sp-muted);
       }
-      .row.selected .icon { color: var(--sp-text); }
+      .row.selected .icon { color: var(--sp-on-accent); }
       .favicon {
         flex: 0 0 auto;
-        width: 16px;
-        height: 16px;
-        border-radius: 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
         object-fit: contain;
       }
       .text { flex: 1 1 auto; min-width: 0; }
       .title {
         font-size: 13px;
+        font-weight: 500;
         color: var(--sp-text);
         white-space: nowrap;
         overflow: hidden;
@@ -284,9 +373,32 @@
         text-overflow: ellipsis;
         margin-top: 2px;
       }
+      .row.selected .title { color: var(--sp-on-accent); }
+      .row.selected .url { color: rgba(255, 255, 255, 0.75); }
+      .badge {
+        flex: 0 0 auto;
+        margin-left: 8px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: var(--sp-badge-bg);
+        color: var(--sp-muted);
+      }
+      .badge-tab {
+        background: var(--sp-badge-tab-bg);
+        color: var(--sp-badge-tab-text);
+      }
+      .row.selected .badge {
+        background: rgba(255, 255, 255, 0.9);
+        color: var(--sp-accent);
+      }
       .hint {
-        margin-top: 10px;
-        font-size: 12px;
+        margin-top: 8px;
+        padding: 6px 10px 2px;
+        border-top: 1px solid var(--sp-border);
+        font-size: 11px;
         color: var(--sp-muted);
         user-select: none;
       }
@@ -296,29 +408,70 @@
     const panel = document.createElement("div");
     panel.className = "panel";
 
+    const searchField = document.createElement("div");
+    searchField.className = "search-field";
+
+    const searchIcon = document.createElement("span");
+    searchIcon.className = "search-icon";
+    searchIcon.innerHTML =
+      '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>';
+
     const input = document.createElement("input");
     input.type = "text";
     input.className = "spotlight-input";
-    input.placeholder = mode === "tabs" ? "Switch to tab..." : "Search or enter URL...";
+    input.placeholder = "Search tabs and bookmarks...";
     input.autocomplete = "off";
     input.spellcheck = false;
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "close-btn";
+    closeBtn.innerHTML =
+      '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+    closeBtn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      window.close();
+    });
+
+    searchField.appendChild(searchIcon);
+    searchField.appendChild(input);
+    searchField.appendChild(closeBtn);
 
     suggestionsEl = document.createElement("div");
     suggestionsEl.className = "suggestions";
 
-    panel.appendChild(input);
+    panel.appendChild(searchField);
     panel.appendChild(suggestionsEl);
     document.body.appendChild(panel);
 
+    // Center on the screen (golden-ratio 600x373 content). The service
+    // worker can't see screen dimensions, so the popup repositions itself.
+    const CONTENT_W = 600;
+    const CONTENT_H = 373;
+    const TITLEBAR = 28;
+    const left = Math.round(screen.availLeft + (screen.availWidth - CONTENT_W) / 2);
+    const top =
+      Math.round(screen.availTop + (screen.availHeight - CONTENT_H) / 2) - TITLEBAR;
+    chrome.windows.update(
+      chrome.windows.WINDOW_ID_CURRENT,
+      { left, top, width: CONTENT_W, height: CONTENT_H + TITLEBAR, focused: true },
+      () => { void chrome.runtime.lastError; }
+    );
+
     input.focus();
 
-    if (mode === "tabs") {
-      chrome.runtime.sendMessage({ type: "GET_TABS" }, (response) => {
-        void chrome.runtime.lastError;
-        allTabs = (response && response.tabs) || [];
-        filterTabs("");
-      });
-    }
+    chrome.runtime.sendMessage({ type: "GET_TABS" }, (response) => {
+      void chrome.runtime.lastError;
+      allTabs = ((response && response.tabs) || []).filter(
+        (t) => t.tabId !== originTabId
+      );
+      tabUrls = new Set(allTabs.map((t) => t.url));
+      const q = input.value;
+      tabMatches = getTabMatches(q);
+      bhMatches = bhMatches.filter((s) => !tabUrls.has(s.url));
+      if (!q.trim()) selectedIdx = tabMatches.length ? 0 : -1;
+      rebuildSuggestions();
+    });
 
     input.addEventListener("input", () => onInputChange(input.value));
 
@@ -328,7 +481,7 @@
         const newTab = !e.shiftKey;
         if (selectedIdx >= 0 && suggestions[selectedIdx]) {
           onSelect(suggestions[selectedIdx], newTab);
-        } else if (mode !== "tabs") {
+        } else {
           const url = resolveQuery(input.value);
           if (url) navigate(url, newTab);
         }

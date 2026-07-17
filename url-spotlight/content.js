@@ -1,4 +1,10 @@
 (() => {
+  // On-demand injection (background retry) can race the manifest's
+  // document_idle injection — a second copy would register a duplicate
+  // message listener and instantly open+close the overlay.
+  if (window.__spotlightContent) return;
+  window.__spotlightContent = true;
+
   const SEARCH_ENGINES = {
     duckduckgo: { name: "DuckDuckGo", url: "https://duckduckgo.com/?q=" },
     google: { name: "Google", url: "https://www.google.com/search?q=" },
@@ -10,6 +16,7 @@
   const DEFAULT_TASKVIEW_SHORTCUT = { alt: true, ctrl: false, shift: false, meta: false, key: "Tab" };
 
   let hostEl = null;
+  let inputEl = null;
   let suggestionsEl = null;
   let suggestions = [];
   let selectedIdx = -1;
@@ -17,8 +24,10 @@
   let lastQueryId = 0;
   let searchEngine = DEFAULT_ENGINE;
   let loadingAnimation = true;
-  let mode = "url";
   let allTabs = [];
+  let tabUrls = new Set();
+  let tabMatches = [];
+  let bhMatches = [];
   let taskViewShortcut = DEFAULT_TASKVIEW_SHORTCUT;
 
   chrome.storage.sync.get(
@@ -53,6 +62,7 @@
     if (!hostEl) return;
     hostEl.remove();
     hostEl = null;
+    inputEl = null;
     suggestionsEl = null;
     suggestions = [];
     selectedIdx = -1;
@@ -124,22 +134,92 @@
     };
   }
 
-  function filterTabs(query) {
+  function getTabMatches(query) {
     const q = query.trim();
-    if (!q) {
-      suggestions = allTabs.map(toTabSuggestion);
-    } else {
-      suggestions = allTabs
-        .map((t) => ({
-          t,
-          score: Math.max(fuzzyScore(q, t.title), fuzzyScore(q, t.url)),
-        }))
-        .filter((x) => x.score >= 0)
-        .sort((a, b) => b.score - a.score)
-        .map((x) => toTabSuggestion(x.t));
-    }
-    selectedIdx = suggestions.length ? 0 : -1;
+    if (!q) return allTabs.slice(0, 8).map(toTabSuggestion);
+    return allTabs
+      .map((t) => ({
+        t,
+        score: Math.max(fuzzyScore(q, t.title), fuzzyScore(q, t.url)),
+      }))
+      .filter((x) => x.score >= 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6)
+      .map((x) => toTabSuggestion(x.t));
+  }
+
+  function rebuildSuggestions() {
+    suggestions = [...tabMatches, ...bhMatches];
+    if (selectedIdx >= suggestions.length) selectedIdx = suggestions.length - 1;
     renderSuggestions();
+  }
+
+  const ICON_SVGS = {
+    tab: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><ellipse cx="8" cy="8" rx="2.8" ry="6.2"/><path d="M2 8h12"/></svg>',
+    bookmark:
+      '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.7l1.9 3.9 4.3.6-3.1 3 .7 4.2L8 11.4l-3.8 2 .7-4.2-3.1-3 4.3-.6z"/></svg>',
+    history:
+      '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.5V8l2.4 1.6"/></svg>',
+  };
+
+  const BADGE_LABELS = { tab: "TAB", bookmark: "BOOKMARK", history: "HISTORY" };
+
+  function makeTypeIcon(type) {
+    const span = document.createElement("span");
+    span.className = "icon";
+    span.innerHTML = ICON_SVGS[type] || ICON_SVGS.history;
+    return span;
+  }
+
+  function appendRow(s, i) {
+    const row = document.createElement("div");
+    row.className = "row" + (i === selectedIdx ? " selected" : "");
+
+    let icon;
+    if (s.type === "tab" && s.favIconUrl) {
+      icon = document.createElement("img");
+      icon.className = "favicon";
+      icon.src = s.favIconUrl;
+      icon.addEventListener("error", () => {
+        icon.replaceWith(makeTypeIcon(s.type));
+      });
+    } else {
+      icon = makeTypeIcon(s.type);
+    }
+
+    const text = document.createElement("div");
+    text.className = "text";
+
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = s.title;
+
+    const url = document.createElement("div");
+    url.className = "url";
+    url.textContent = s.url;
+
+    text.appendChild(title);
+    text.appendChild(url);
+
+    const badge = document.createElement("span");
+    badge.className = "badge badge-" + s.type;
+    badge.textContent = BADGE_LABELS[s.type] || s.type.toUpperCase();
+
+    row.appendChild(icon);
+    row.appendChild(text);
+    row.appendChild(badge);
+
+    row.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onSelect(s, !e.shiftKey);
+    });
+    row.addEventListener("mouseenter", () => {
+      selectedIdx = i;
+      updateSelectionHighlight();
+    });
+
+    suggestionsEl.appendChild(row);
   }
 
   function renderSuggestions() {
@@ -152,56 +232,17 @@
     }
     suggestionsEl.style.display = "block";
 
-    suggestions.forEach((s, i) => {
-      const row = document.createElement("div");
-      row.className = "row" + (i === selectedIdx ? " selected" : "");
+    const renderSection = (label, items, offset) => {
+      if (!items.length) return;
+      const header = document.createElement("div");
+      header.className = "section-header";
+      header.textContent = label;
+      suggestionsEl.appendChild(header);
+      items.forEach((s, j) => appendRow(s, offset + j));
+    };
 
-      let icon;
-      if (s.type === "tab" && s.favIconUrl) {
-        icon = document.createElement("img");
-        icon.className = "favicon";
-        icon.src = s.favIconUrl;
-        icon.addEventListener("error", () => {
-          const fallback = document.createElement("span");
-          fallback.className = "icon";
-          fallback.textContent = "▢";
-          icon.replaceWith(fallback);
-        });
-      } else {
-        icon = document.createElement("span");
-        icon.className = "icon";
-        icon.textContent =
-          s.type === "tab" ? "▢" : s.type === "bookmark" ? "★" : "↻";
-      }
-
-      const text = document.createElement("div");
-      text.className = "text";
-
-      const title = document.createElement("div");
-      title.className = "title";
-      title.textContent = s.title;
-
-      const url = document.createElement("div");
-      url.className = "url";
-      url.textContent = s.url;
-
-      text.appendChild(title);
-      text.appendChild(url);
-      row.appendChild(icon);
-      row.appendChild(text);
-
-      row.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onSelect(s, !e.shiftKey);
-      });
-      row.addEventListener("mouseenter", () => {
-        selectedIdx = i;
-        updateSelectionHighlight();
-      });
-
-      suggestionsEl.appendChild(row);
-    });
+    renderSection("Open Tabs", tabMatches, 0);
+    renderSection("Bookmarks & History", bhMatches, tabMatches.length);
   }
 
   function updateSelectionHighlight() {
@@ -209,46 +250,50 @@
     const rows = suggestionsEl.querySelectorAll(".row");
     rows.forEach((r, i) => {
       r.classList.toggle("selected", i === selectedIdx);
+      if (i === selectedIdx) r.scrollIntoView({ block: "nearest" });
     });
   }
 
   function requestSuggestions(query) {
     const myId = ++lastQueryId;
-    console.log("[spotlight content] sending query:", query);
     chrome.runtime.sendMessage(
       { type: "SEARCH_SUGGESTIONS", query },
       (response) => {
-        const err = chrome.runtime.lastError;
-        console.log("[spotlight content] response:", response, "err:", err);
+        void chrome.runtime.lastError;
         if (myId !== lastQueryId) return;
-        suggestions = (response && response.suggestions) || [];
-        selectedIdx = -1;
-        renderSuggestions();
+        const items = (response && response.suggestions) || [];
+        // An already-open tab beats reloading the same URL from history.
+        bhMatches = items.filter((s) => !tabUrls.has(s.url));
+        rebuildSuggestions();
       }
     );
   }
 
   function onInputChange(value) {
-    if (mode === "tabs") {
-      filterTabs(value);
-      return;
-    }
     if (debounceTimer) clearTimeout(debounceTimer);
     const trimmed = value.trim();
     if (!trimmed) {
       lastQueryId++;
-      suggestions = [];
-      selectedIdx = -1;
-      renderSuggestions();
+      bhMatches = [];
+      tabMatches = getTabMatches("");
+      selectedIdx = tabMatches.length ? 0 : -1;
+      rebuildSuggestions();
       return;
     }
+    tabMatches = getTabMatches(trimmed);
+    // No default selection while typing: plain Enter must keep resolving the
+    // raw query (URL / search engine) unless the user picks a row.
+    selectedIdx = -1;
+    rebuildSuggestions();
     debounceTimer = setTimeout(() => requestSuggestions(trimmed), 80);
   }
 
-  function open(openMode) {
+  function open() {
     if (hostEl) return;
-    mode = openMode === "tabs" ? "tabs" : "url";
     allTabs = [];
+    tabUrls = new Set();
+    tabMatches = [];
+    bhMatches = [];
 
     hostEl = document.createElement("div");
     hostEl.style.all = "initial";
@@ -262,25 +307,33 @@
     const style = document.createElement("style");
     style.textContent = `
       :host {
-        --sp-bg: #1e1e1e;
+        --sp-bg: rgba(40, 40, 44, 0.96);
         --sp-text: #ffffff;
         --sp-text-secondary: #e0e0e0;
-        --sp-muted: #888888;
-        --sp-placeholder: #666666;
-        --sp-selected-bg: rgba(255, 255, 255, 0.08);
-        --sp-border: rgba(255, 255, 255, 0.08);
-        --sp-panel-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+        --sp-muted: rgba(235, 235, 245, 0.6);
+        --sp-placeholder: rgba(235, 235, 245, 0.35);
+        --sp-border: rgba(255, 255, 255, 0.1);
+        --sp-accent: #3b82f6;
+        --sp-on-accent: #ffffff;
+        --sp-badge-bg: rgba(255, 255, 255, 0.1);
+        --sp-badge-tab-bg: rgba(59, 130, 246, 0.28);
+        --sp-badge-tab-text: #9cc2ff;
+        --sp-panel-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
       }
       @media (prefers-color-scheme: light) {
         :host {
-          --sp-bg: #ffffff;
-          --sp-text: #1a1a1a;
-          --sp-text-secondary: #2c2c2c;
-          --sp-muted: #6b7280;
-          --sp-placeholder: #9aa0aa;
-          --sp-selected-bg: rgba(0, 0, 0, 0.06);
-          --sp-border: rgba(0, 0, 0, 0.1);
-          --sp-panel-shadow: 0 20px 60px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.08);
+          --sp-bg: rgba(238, 238, 240, 0.97);
+          --sp-text: #1d1d1f;
+          --sp-text-secondary: #1d1d1f;
+          --sp-muted: #6e6e73;
+          --sp-placeholder: #a1a1a6;
+          --sp-border: rgba(0, 0, 0, 0.08);
+          --sp-accent: #3478f6;
+          --sp-on-accent: #ffffff;
+          --sp-badge-bg: rgba(0, 0, 0, 0.07);
+          --sp-badge-tab-bg: rgba(52, 120, 246, 0.12);
+          --sp-badge-tab-text: #3478f6;
+          --sp-panel-shadow: 0 24px 70px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.1);
         }
       }
       :host, * { box-sizing: border-box; }
@@ -292,31 +345,45 @@
       }
       .panel {
         position: fixed;
-        top: 28vh;
+        top: 24vh;
         left: 50%;
         transform: translateX(-50%) translateY(-4px);
-        width: 560px;
+        width: 600px;
         max-width: calc(100vw - 32px);
-        padding: 16px 20px;
+        padding: 10px;
         background: var(--sp-bg);
+        -webkit-backdrop-filter: blur(24px) saturate(1.4);
+        backdrop-filter: blur(24px) saturate(1.4);
         border-radius: 14px;
         box-shadow: var(--sp-panel-shadow);
         opacity: 0;
         transition: opacity 100ms ease-out, transform 100ms ease-out;
         pointer-events: auto;
-        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
       .panel.visible {
         opacity: 1;
         transform: translateX(-50%) translateY(0);
       }
+      .search-field {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+      }
+      .search-icon {
+        flex: 0 0 auto;
+        display: flex;
+        color: var(--sp-muted);
+      }
       input.spotlight-input {
-        width: 100%;
+        flex: 1 1 auto;
+        min-width: 0;
         border: none;
         outline: none;
         background: transparent;
         color: var(--sp-text);
-        font: 20px ui-monospace, SFMono-Regular, Menlo, Monaco, "Courier New", monospace;
+        font: 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         padding: 0;
         margin: 0;
         caret-color: var(--sp-text);
@@ -324,42 +391,70 @@
       input.spotlight-input::placeholder {
         color: var(--sp-placeholder);
       }
+      .close-btn {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--sp-muted);
+        cursor: pointer;
+        padding: 0;
+      }
+      .close-btn:hover {
+        background: var(--sp-badge-bg);
+        color: var(--sp-text);
+      }
       .suggestions {
         display: none;
-        margin-top: 12px;
+        margin-top: 8px;
         border-top: 1px solid var(--sp-border);
-        padding-top: 8px;
-        max-height: 320px;
+        padding-top: 2px;
+        max-height: 380px;
         overflow-y: auto;
+      }
+      .section-header {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--sp-muted);
+        padding: 10px 10px 4px;
+        user-select: none;
       }
       .row {
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 8px 8px;
+        gap: 10px;
+        padding: 7px 10px;
         border-radius: 8px;
         cursor: pointer;
         color: var(--sp-text-secondary);
       }
       .row.selected {
-        background: var(--sp-selected-bg);
+        background: var(--sp-accent);
       }
       .icon {
         flex: 0 0 auto;
         width: 18px;
-        text-align: center;
-        font-size: 13px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         color: var(--sp-muted);
       }
       .favicon {
         flex: 0 0 auto;
-        width: 16px;
-        height: 16px;
-        border-radius: 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
         object-fit: contain;
       }
       .row.selected .icon {
-        color: var(--sp-text);
+        color: var(--sp-on-accent);
       }
       .text {
         flex: 1 1 auto;
@@ -367,6 +462,7 @@
       }
       .title {
         font-size: 13px;
+        font-weight: 500;
         color: var(--sp-text);
         white-space: nowrap;
         overflow: hidden;
@@ -380,11 +476,37 @@
         text-overflow: ellipsis;
         margin-top: 2px;
       }
-      .hint {
-        margin-top: 10px;
-        font-size: 12px;
+      .row.selected .title {
+        color: var(--sp-on-accent);
+      }
+      .row.selected .url {
+        color: rgba(255, 255, 255, 0.75);
+      }
+      .badge {
+        flex: 0 0 auto;
+        margin-left: 8px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: var(--sp-badge-bg);
         color: var(--sp-muted);
-        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .badge-tab {
+        background: var(--sp-badge-tab-bg);
+        color: var(--sp-badge-tab-text);
+      }
+      .row.selected .badge {
+        background: rgba(255, 255, 255, 0.9);
+        color: var(--sp-accent);
+      }
+      .hint {
+        margin-top: 8px;
+        padding: 6px 10px 2px;
+        border-top: 1px solid var(--sp-border);
+        font-size: 11px;
+        color: var(--sp-muted);
         user-select: none;
       }
     `;
@@ -395,25 +517,44 @@
     const panel = document.createElement("div");
     panel.className = "panel";
 
+    const searchField = document.createElement("div");
+    searchField.className = "search-field";
+
+    const searchIcon = document.createElement("span");
+    searchIcon.className = "search-icon";
+    searchIcon.innerHTML =
+      '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>';
+
     const input = document.createElement("input");
     input.type = "text";
     input.className = "spotlight-input";
-    input.placeholder =
-      mode === "tabs" ? "Switch to tab..." : "Search or enter URL...";
+    input.placeholder = "Search tabs and bookmarks...";
     input.autocomplete = "off";
     input.spellcheck = false;
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "close-btn";
+    closeBtn.innerHTML =
+      '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+    closeBtn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    });
+
+    searchField.appendChild(searchIcon);
+    searchField.appendChild(input);
+    searchField.appendChild(closeBtn);
 
     suggestionsEl = document.createElement("div");
     suggestionsEl.className = "suggestions";
 
     const hint = document.createElement("div");
     hint.className = "hint";
-    hint.textContent =
-      mode === "tabs"
-        ? "↵ switch  ·  ↑↓ pick  ·  esc close"
-        : "↵ open  ·  ⇧↵ new tab  ·  ↑↓ pick  ·  esc close";
+    hint.textContent = "↵ open/switch  ·  ⇧↵ this page  ·  ↑↓ pick  ·  esc close";
 
-    panel.appendChild(input);
+    panel.appendChild(searchField);
     panel.appendChild(suggestionsEl);
     panel.appendChild(hint);
     shadow.appendChild(style);
@@ -422,16 +563,23 @@
     document.documentElement.appendChild(hostEl);
 
     requestAnimationFrame(() => panel.classList.add("visible"));
+    inputEl = input;
     setTimeout(() => input.focus(), 0);
 
-    if (mode === "tabs") {
-      chrome.runtime.sendMessage({ type: "GET_TABS" }, (response) => {
+    chrome.runtime.sendMessage(
+      { type: "GET_TABS", excludeSelf: true },
+      (response) => {
         void chrome.runtime.lastError;
-        if (!hostEl || mode !== "tabs") return;
+        if (!hostEl) return;
         allTabs = (response && response.tabs) || [];
-        filterTabs("");
-      });
-    }
+        tabUrls = new Set(allTabs.map((t) => t.url));
+        const q = inputEl ? inputEl.value : "";
+        tabMatches = getTabMatches(q);
+        bhMatches = bhMatches.filter((s) => !tabUrls.has(s.url));
+        if (!q.trim()) selectedIdx = tabMatches.length ? 0 : -1;
+        rebuildSuggestions();
+      }
+    );
 
     backdrop.addEventListener("mousedown", (e) => {
       e.preventDefault();
@@ -450,7 +598,7 @@
         const newTab = !e.shiftKey;
         if (selectedIdx >= 0 && suggestions[selectedIdx]) {
           onSelect(suggestions[selectedIdx], newTab);
-        } else if (mode !== "tabs") {
+        } else {
           const url = resolveQuery(input.value);
           if (url) navigate(url, newTab);
         }
@@ -475,24 +623,23 @@
     input.addEventListener("keypress", (e) => e.stopPropagation());
   }
 
-  chrome.runtime.onMessage.addListener((msg) => {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg) return;
-    let requestedMode;
-    if (msg.type === "TOGGLE_SPOTLIGHT") requestedMode = "url";
-    else if (msg.type === "TOGGLE_TAB_SWITCHER") requestedMode = "tabs";
-    else return;
+    // Both commands open the same unified overlay; either one toggles it.
+    if (msg.type !== "TOGGLE_SPOTLIGHT" && msg.type !== "TOGGLE_TAB_SWITCHER")
+      return;
 
-    if (hostEl && mode === requestedMode) {
-      close();
-    } else {
-      if (hostEl) close();
-      open(requestedMode);
-    }
+    if (hostEl) close();
+    else open();
+    // ACK so background knows the overlay handled it and skips popup fallback.
+    sendResponse({ ok: true });
   });
 
   // --- Task View tab switcher (hold modifier, tap key to cycle, release to switch) ---
 
   let taskViewActive = false;
+  let taskViewPending = false; // GET_TABS request in flight
+  let taskViewCommitOnArrival = false; // modifier released before tabs arrived
   let taskViewTabs = [];
   let taskViewIndex = -1;
   let taskViewHostEl = null;
@@ -521,14 +668,22 @@
   }
 
   function startTaskView() {
+    if (taskViewPending) return;
+    taskViewPending = true;
+    taskViewCommitOnArrival = false;
     chrome.runtime.sendMessage({ type: "GET_TABS" }, (response) => {
       void chrome.runtime.lastError;
+      if (!taskViewPending) return; // cancelled (Escape/blur) before tabs arrived
+      taskViewPending = false;
       const tabs = (response && response.tabs) || [];
       if (tabs.length < 2) return;
       taskViewTabs = tabs;
       taskViewIndex = 1;
       taskViewActive = true;
-      renderTaskView();
+      // Quick tap: modifier already released — switch immediately, no overlay.
+      if (taskViewCommitOnArrival) commitTaskView();
+      else renderTaskView();
+      taskViewCommitOnArrival = false;
     });
   }
 
@@ -700,14 +855,16 @@
     "keydown",
     (e) => {
       if (hostEl) return; // spotlight/tab-search overlay already open, don't conflict
-      if (taskViewActive) {
+      if (taskViewActive || taskViewPending) {
         if (e.key === "Escape") {
           e.preventDefault();
           e.stopPropagation();
+          taskViewPending = false;
+          taskViewCommitOnArrival = false;
           closeTaskView();
           return;
         }
-        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        if (taskViewActive && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
           e.preventDefault();
           e.stopPropagation();
           advanceTaskView(e.key === "ArrowLeft" ? -1 : 1);
@@ -726,13 +883,17 @@
   document.addEventListener(
     "keyup",
     (e) => {
-      if (!taskViewActive) return;
-      if (isTaskViewModifierKey(e.key)) commitTaskView();
+      if (!isTaskViewModifierKey(e.key)) return;
+      if (taskViewActive) commitTaskView();
+      else if (taskViewPending) taskViewCommitOnArrival = true;
     },
     true
   );
 
   window.addEventListener("blur", () => {
+    taskViewPending = false;
+    taskViewCommitOnArrival = false;
     if (taskViewActive) commitTaskView();
   });
+
 })();

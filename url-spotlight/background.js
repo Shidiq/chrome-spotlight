@@ -14,10 +14,38 @@ function isRestrictedUrl(url) {
   );
 }
 
-function sendToggle(tabId, msgType) {
-  chrome.tabs.sendMessage(tabId, { type: msgType }, () => {
+function sendToggle(tabId, msgType, command, isRetry) {
+  chrome.tabs.sendMessage(tabId, { type: msgType }, (res) => {
     const err = chrome.runtime.lastError;
-    if (err) console.log("[spotlight bg] toggle err:", err.message);
+    // Content script ACKs with {ok:true}. Without the ACK check, a listener
+    // that handles the message but sends no response still sets lastError
+    // ("message port closed") and would wrongly trigger the fallback.
+    if (!err && res && res.ok) return;
+    if (isRetry) {
+      console.log(
+        "[spotlight bg] toggle failed after inject, using popup fallback:",
+        err ? err.message : "no ack"
+      );
+      openPopupFallback(command, tabId);
+      return;
+    }
+    // No content script in this tab (tab loaded before install, file://,
+    // page still loading…) — inject on demand, then retry once.
+    chrome.scripting.executeScript(
+      { target: { tabId }, files: ["loader.js", "content.js"] },
+      () => {
+        if (chrome.runtime.lastError) {
+          // Page Chrome refuses to inject into (chrome://, Web Store…)
+          console.log(
+            "[spotlight bg] inject failed, using popup fallback:",
+            chrome.runtime.lastError.message
+          );
+          openPopupFallback(command, tabId);
+          return;
+        }
+        sendToggle(tabId, msgType, command, true);
+      }
+    );
   });
 }
 
@@ -28,7 +56,7 @@ function openPopupFallback(command, originTabId) {
   });
   const popupUrl = chrome.runtime.getURL("popup.html") + "?" + params.toString();
   const popupWidth = 600;
-  const popupContentHeight = 420;
+  const popupContentHeight = 373;
   // Push window up by titlebar height so only content is visible (frameless look)
   const titlebarHeight = 28;
   const popupHeight = popupContentHeight + titlebarHeight;
@@ -58,7 +86,7 @@ chrome.commands.onCommand.addListener((command, tab) => {
     if (isRestrictedUrl(t.url)) {
       openPopupFallback(command, t.id);
     } else {
-      sendToggle(t.id, msgType);
+      sendToggle(t.id, msgType, command);
     }
   };
 
@@ -137,9 +165,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg && msg.type === "GET_TABS") {
+    const popupUrl = chrome.runtime.getURL("popup.html");
+    const selfTabId = msg.excludeSelf ? sender.tab && sender.tab.id : null;
     chrome.tabs.query({}, (tabs) => {
       const list = (tabs || [])
-        .filter((t) => t.id != null)
+        .filter(
+          (t) =>
+            t.id != null &&
+            t.id !== selfTabId &&
+            !(t.url || "").startsWith(popupUrl)
+        )
         .map((t) => ({
           tabId: t.id,
           windowId: t.windowId,
@@ -225,7 +260,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     items.sort((a, b) => b.score - a.score);
-    sendResponse({ suggestions: items.slice(0, 5) });
+    sendResponse({ suggestions: items.slice(0, 6) });
   });
 
   return true;
