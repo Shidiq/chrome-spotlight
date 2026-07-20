@@ -180,7 +180,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           windowId: t.windowId,
           title: t.title || t.url || "",
           url: t.url || "",
-          favIconUrl: t.favIconUrl || "",
+          // Serve favicons from Chrome's local cache (_favicon API) instead of
+          // the raw favIconUrl: loading e.g. http://127.0.0.1 images from an
+          // HTTPS page triggers mixed-content blocks and macOS local-network
+          // permission prompts.
+          favIconUrl: t.url
+            ? chrome.runtime.getURL(
+                "/_favicon/?pageUrl=" + encodeURIComponent(t.url) + "&size=32"
+              )
+            : "",
           active: !!t.active,
           lastAccessed: t.lastAccessed || 0,
         }))
