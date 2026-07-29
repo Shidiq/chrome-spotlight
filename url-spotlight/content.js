@@ -205,6 +205,12 @@
     badge.className = "badge badge-" + s.type;
     badge.textContent = BADGE_LABELS[s.type] || s.type.toUpperCase();
 
+    const numBadge = document.createElement("span");
+    numBadge.className = "num-badge";
+    if (i < 9) numBadge.textContent = String(i + 1);
+    else numBadge.style.visibility = "hidden";
+
+    row.appendChild(numBadge);
     row.appendChild(icon);
     row.appendChild(text);
     row.appendChild(badge);
@@ -501,6 +507,23 @@
         background: rgba(255, 255, 255, 0.9);
         color: var(--sp-accent);
       }
+      .num-badge {
+        flex: 0 0 auto;
+        width: 18px;
+        height: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 600;
+        border-radius: 5px;
+        background: var(--sp-badge-bg);
+        color: var(--sp-muted);
+      }
+      .row.selected .num-badge {
+        background: rgba(255, 255, 255, 0.9);
+        color: var(--sp-accent);
+      }
       .hint {
         margin-top: 8px;
         padding: 6px 10px 2px;
@@ -552,7 +575,8 @@
 
     const hint = document.createElement("div");
     hint.className = "hint";
-    hint.textContent = "↵ open/switch  ·  ⇧↵ this page  ·  ↑↓ pick  ·  esc close";
+    hint.textContent =
+      "↵ open/switch  ·  ⇧↵ this page  ·  ↑↓ pick  ·  ⌥1-9 jump  ·  esc close";
 
     panel.appendChild(searchField);
     panel.appendChild(suggestionsEl);
@@ -593,6 +617,12 @@
 
     input.addEventListener("keydown", (e) => {
       e.stopPropagation();
+      if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code)) {
+        e.preventDefault();
+        const s = suggestions[Number(e.code.slice(5)) - 1];
+        if (s) onSelect(s, !e.shiftKey);
+        return;
+      }
       if (e.key === "Enter") {
         e.preventDefault();
         const newTab = !e.shiftKey;
