@@ -576,7 +576,7 @@
     const hint = document.createElement("div");
     hint.className = "hint";
     hint.textContent =
-      "↵ open/switch  ·  ⇧↵ this page  ·  ↑↓ pick  ·  ⌥1-9 jump  ·  esc close";
+      "↵ open/switch  ·  ⇧↵ this page  ·  1-9 jump  ·  ⇧1-9 type digit  ·  esc close";
 
     panel.appendChild(searchField);
     panel.appendChild(suggestionsEl);
@@ -617,6 +617,25 @@
 
     input.addEventListener("keydown", (e) => {
       e.stopPropagation();
+      if (!e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[0-9]$/.test(e.code)) {
+        const digit = e.code.slice(5);
+        if (e.shiftKey) {
+          // Shift+digit types the literal digit (default would be !@#…).
+          e.preventDefault();
+          input.setRangeText(digit, input.selectionStart, input.selectionEnd, "end");
+          onInputChange(input.value);
+          return;
+        }
+        if (digit !== "0") {
+          const s = suggestions[Number(digit) - 1];
+          if (s) {
+            e.preventDefault();
+            onSelect(s, true);
+            return;
+          }
+          // No result at that number: let the digit type normally.
+        }
+      }
       if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code)) {
         e.preventDefault();
         const s = suggestions[Number(e.code.slice(5)) - 1];
