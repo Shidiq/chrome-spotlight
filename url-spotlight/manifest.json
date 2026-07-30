@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "URL Spotlight",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Spotlight-style overlay to search open tabs, bookmarks, and history — or open any URL — from any page.",
   "permissions": ["activeTab", "tabs", "bookmarks", "history", "storage", "scripting", "favicon"],
   "host_permissions": ["<all_urls>"],
