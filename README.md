@@ -28,6 +28,15 @@ Chrome/Helium extension. One macOS-style Spotlight overlay for URL navigation, s
 - On pages content scripts can't reach (`chrome://`, Web Store, etc.) the shortcut opens the same overlay in a small popup window instead — same keys, same behavior
 - The new-tab page shows the overlay directly
 
+## Tab groups popup
+
+- Click the toolbar icon → popup lists every open tab group (color dot, name, tab count, window number when groups span multiple windows)
+- Click or `Enter` on a group → un-collapses it, activates its first tab, focuses its window
+- `↑` / `↓` move the selection, `1`-`9` jump straight to a group, `Esc` closes
+- **Recently closed** section lists groups you closed while the extension was running (up to 10) — clicking one reopens its tabs back inside a group with the original name and color
+- If a group with the same name and color is already open, restored tabs join it instead of creating a second group
+- Chrome exposes no API for its own saved tab groups, so groups saved to the bookmarks bar are only reopenable from that chip — the list here covers groups the extension saw close
+
 ## Task View tab switcher
 
 - Hold `Alt`/`Option` and tap `Tab` to cycle open tabs card-style; release the modifier to switch — configurable at `chrome://extensions` → extension options

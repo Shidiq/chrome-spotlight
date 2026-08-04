@@ -3,6 +3,86 @@ const COMMAND_MESSAGES = {
   "switch-tabs": "TOGGLE_TAB_SWITCHER",
 };
 
+// --- Closed tab group tracking -------------------------------------------
+// Chrome exposes no API for saved/closed tab groups, so we keep our own
+// snapshots of live groups (storage.session survives worker restarts) and
+// archive a group to storage.local the moment it is removed.
+const CLOSED_GROUPS_KEY = "closedGroups";
+const CLOSED_GROUPS_MAX = 10;
+let snapshotTimer = null;
+
+function snapshotGroups() {
+  chrome.tabGroups.query({}, (groups) => {
+    if (chrome.runtime.lastError || !groups) return;
+    chrome.tabs.query({}, (tabs) => {
+      if (chrome.runtime.lastError || !tabs) return;
+      const snap = {};
+      for (const g of groups) {
+        snap[g.id] = { title: g.title || "", color: g.color, urls: [] };
+      }
+      for (const t of tabs) {
+        if (t.groupId != null && t.groupId !== -1 && snap[t.groupId] && t.url) {
+          snap[t.groupId].urls.push(t.url);
+        }
+      }
+      chrome.storage.session.set({ liveGroupSnapshots: snap }, () => {
+        void chrome.runtime.lastError;
+      });
+    });
+  });
+}
+
+function scheduleSnapshot() {
+  // Debounced so tab-close storms settle before we rebuild; a group removal
+  // lands within the quiet window and still reads the pre-close snapshot.
+  if (snapshotTimer) clearTimeout(snapshotTimer);
+  snapshotTimer = setTimeout(() => {
+    snapshotTimer = null;
+    snapshotGroups();
+  }, 250);
+}
+
+function archiveClosedGroup(group) {
+  chrome.storage.session.get("liveGroupSnapshots", (data) => {
+    void chrome.runtime.lastError;
+    const snap = (data && data.liveGroupSnapshots && data.liveGroupSnapshots[group.id]) || null;
+    const urls = snap ? snap.urls : [];
+    if (!urls.length) return;
+    const entry = {
+      title: (snap && snap.title) || group.title || "",
+      color: (snap && snap.color) || group.color || "grey",
+      urls,
+      closedAt: Date.now(),
+    };
+    chrome.storage.local.get(CLOSED_GROUPS_KEY, (store) => {
+      void chrome.runtime.lastError;
+      let list = (store && store[CLOSED_GROUPS_KEY]) || [];
+      const key = entry.title + "\n" + urls.join("\n");
+      list = list.filter((e) => e.title + "\n" + (e.urls || []).join("\n") !== key);
+      list.unshift(entry);
+      chrome.storage.local.set({ [CLOSED_GROUPS_KEY]: list.slice(0, CLOSED_GROUPS_MAX) }, () => {
+        void chrome.runtime.lastError;
+      });
+    });
+  });
+}
+
+chrome.tabGroups.onCreated.addListener(scheduleSnapshot);
+chrome.tabGroups.onUpdated.addListener(scheduleSnapshot);
+chrome.tabGroups.onMoved.addListener(scheduleSnapshot);
+chrome.tabGroups.onRemoved.addListener((group) => {
+  archiveClosedGroup(group);
+  scheduleSnapshot();
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url || changeInfo.groupId != null) scheduleSnapshot();
+});
+chrome.tabs.onRemoved.addListener(scheduleSnapshot);
+chrome.tabs.onAttached.addListener(scheduleSnapshot);
+
+snapshotGroups();
+// --------------------------------------------------------------------------
+
 function isRestrictedUrl(url) {
   if (!url) return true;
   if (url.startsWith(`chrome-extension://${chrome.runtime.id}/`)) return false;
@@ -196,6 +276,77 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ tabs: list });
     });
     return true;
+  }
+
+  if (msg && msg.type === "RESTORE_GROUP" && msg.entry && Array.isArray(msg.entry.urls)) {
+    // Runs here, not in the popup: the popup document dies as soon as it
+    // loses focus, which would abort mid-restore and leave ungrouped tabs.
+    const entry = msg.entry;
+    if (!entry.urls.length) return false;
+    const tabIds = [];
+    let remaining = entry.urls.length;
+    entry.urls.forEach((url, idx) => {
+      chrome.tabs.create({ url, active: false }, (tab) => {
+        void chrome.runtime.lastError;
+        if (tab && tab.id != null) tabIds[idx] = tab.id;
+        remaining -= 1;
+        if (remaining > 0) return;
+        const ids = tabIds.filter((id) => id != null);
+        if (!ids.length) return;
+        const finish = () => {
+          chrome.tabs.update(ids[0], { active: true }, () => {
+            void chrome.runtime.lastError;
+          });
+          chrome.storage.local.get(CLOSED_GROUPS_KEY, (store) => {
+            void chrome.runtime.lastError;
+            const list = ((store && store[CLOSED_GROUPS_KEY]) || []).filter(
+              (e) =>
+                !(
+                  e.closedAt === entry.closedAt &&
+                  e.title === entry.title &&
+                  (e.urls || []).join("\n") === entry.urls.join("\n")
+                )
+            );
+            chrome.storage.local.set({ [CLOSED_GROUPS_KEY]: list }, () => {
+              void chrome.runtime.lastError;
+            });
+          });
+        };
+        // Reuse an already-open group with the same title+color instead of
+        // creating a new one (a fresh group would get its own auto-saved chip
+        // in the bookmarks bar — Chrome exposes no API to reuse saved groups).
+        chrome.tabGroups.query({ title: entry.title || undefined, color: entry.color }, (existing) => {
+          void chrome.runtime.lastError;
+          const match = (existing || []).find(
+            (g) => (g.title || "") === (entry.title || "") && g.color === entry.color
+          );
+          if (match) {
+            chrome.tabs.group({ tabIds: ids, groupId: match.id }, () => {
+              if (chrome.runtime.lastError) {
+                void chrome.runtime.lastError;
+                return;
+              }
+              chrome.tabGroups.update(match.id, { collapsed: false }, () => {
+                void chrome.runtime.lastError;
+                finish();
+              });
+            });
+            return;
+          }
+          chrome.tabs.group({ tabIds: ids }, (groupId) => {
+            if (chrome.runtime.lastError) {
+              void chrome.runtime.lastError;
+              return;
+            }
+            chrome.tabGroups.update(groupId, { title: entry.title, color: entry.color }, () => {
+              void chrome.runtime.lastError;
+              finish();
+            });
+          });
+        });
+      });
+    });
+    return false;
   }
 
   if (msg && msg.type === "ACTIVATE_TAB" && msg.tabId != null) {

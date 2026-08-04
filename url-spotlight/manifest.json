@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "URL Spotlight",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Spotlight-style overlay to search open tabs, bookmarks, and history — or open any URL — from any page.",
-  "permissions": ["activeTab", "tabs", "bookmarks", "history", "storage", "scripting", "favicon"],
+  "permissions": ["activeTab", "tabs", "tabGroups", "bookmarks", "history", "storage", "scripting", "favicon"],
   "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [
     {
@@ -21,7 +21,9 @@
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png"
-    }
+    },
+    "default_popup": "groups.html",
+    "default_title": "Tab groups"
   },
   "options_ui": {
     "page": "options.html",
