@@ -16,14 +16,62 @@
       overflow: hidden;
     }
     body {
-      background: #2b2f3a url("pixelcity.png") center / cover no-repeat;
+      background: #0a0e1c;
+    }
+    /* Aurora: layered radial glows, heavily blurred, drifting slowly. */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: -25%;
+      z-index: 0;
+      background:
+        radial-gradient(ellipse 55% 45% at 18% 28%, rgba(56, 189, 248, 0.42), transparent 62%),
+        radial-gradient(ellipse 50% 55% at 82% 18%, rgba(139, 92, 246, 0.38), transparent 62%),
+        radial-gradient(ellipse 60% 45% at 62% 82%, rgba(45, 212, 191, 0.30), transparent 62%),
+        radial-gradient(ellipse 40% 40% at 38% 62%, rgba(236, 72, 153, 0.16), transparent 60%),
+        radial-gradient(ellipse 45% 35% at 90% 70%, rgba(59, 130, 246, 0.22), transparent 60%);
+      filter: blur(70px) saturate(1.2);
+      animation: sp-aurora 45s ease-in-out infinite alternate;
+      will-change: transform;
+    }
+    /* Faint grain-less vignette keeps card edges and clock readable. */
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      background: radial-gradient(ellipse 120% 100% at 50% 0%, transparent 60%, rgba(4, 6, 14, 0.45));
+      pointer-events: none;
+    }
+    @keyframes sp-aurora {
+      0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+      50%  { transform: translate3d(3%, -2%, 0) rotate(4deg) scale(1.08); }
+      100% { transform: translate3d(-3%, 2%, 0) rotate(-3deg) scale(1.12); }
     }
     @media (prefers-color-scheme: light) {
-      body { background: #eef1f6 url("lightmode.jpg") center / cover no-repeat; }
+      body { background: #eef2f9; }
+      body::before {
+        background:
+          radial-gradient(ellipse 55% 45% at 18% 28%, rgba(125, 211, 252, 0.55), transparent 62%),
+          radial-gradient(ellipse 50% 55% at 82% 18%, rgba(196, 181, 253, 0.50), transparent 62%),
+          radial-gradient(ellipse 60% 45% at 62% 82%, rgba(153, 246, 228, 0.45), transparent 62%),
+          radial-gradient(ellipse 40% 40% at 38% 62%, rgba(251, 207, 232, 0.35), transparent 60%),
+          radial-gradient(ellipse 45% 35% at 90% 70%, rgba(147, 197, 253, 0.35), transparent 60%);
+      }
+      body::after {
+        background: radial-gradient(ellipse 120% 100% at 50% 0%, transparent 65%, rgba(255, 255, 255, 0.35));
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      body::before { animation: none; }
     }
   </style>
+  <link rel="stylesheet" href="widgets.css">
 </head>
 <body>
+  <div id="sp-widgets"></div>
+  <script src="gcal.js"></script>
+  <script src="widgets.js"></script>
   <script src="loader.js"></script>
   <script src="content.js"></script>
 </body>

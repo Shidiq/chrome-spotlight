@@ -33,8 +33,11 @@
       margin: 0;
       min-height: 100vh;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 20px;
+      padding: 40px 0;
       background: var(--sp-page-bg);
       color: var(--sp-text);
       font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -112,6 +115,80 @@
       font-size: 12px;
       cursor: pointer;
     }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--sp-card-border);
+      background: var(--sp-page-bg);
+      color: var(--sp-text);
+      font-size: 13px;
+      outline: none;
+    }
+    input[type="text"]:focus, input[type="password"]:focus { border-color: var(--sp-accent); }
+    .field { margin-top: 16px; }
+    .field-note { margin: 6px 0 0; color: var(--sp-sub); font-size: 11px; }
+    .conn-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    /* Account ids are long; give them the full width and drop the buttons
+       onto their own line rather than ellipsising the address to nothing. */
+    .conn-account {
+      flex: 1 0 100%;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--sp-label);
+      font-size: 12px;
+    }
+    .conn-actions {
+      display: flex;
+      gap: 8px;
+      margin-left: auto;
+    }
+    .btn {
+      flex: 0 0 auto;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--sp-card-border);
+      background: var(--sp-page-bg);
+      color: var(--sp-text);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn:hover { border-color: var(--sp-accent); }
+    .btn[disabled] { opacity: 0.5; cursor: default; }
+    .cal-list {
+      margin-top: 12px;
+      border-top: 1px solid var(--sp-card-border);
+    }
+    .cal-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--sp-card-border);
+      color: var(--sp-label);
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .cal-row input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--sp-accent); cursor: pointer; }
+    .cal-dot {
+      flex: 0 0 auto;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--sp-sub);
+    }
+    .cal-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cal-badge { flex: 0 0 auto; color: var(--sp-sub); font-size: 11px; }
+    .cal-empty { padding: 12px 0; color: var(--sp-sub); font-size: 12px; }
   </style>
 </head>
 <body>
@@ -131,6 +208,59 @@
     </div>
     <div class="status" id="status">Saved</div>
   </div>
+  <div class="card">
+    <h1>Google Calendar</h1>
+    <p class="sub">Which calendars the new tab shows</p>
+    <div class="conn-row">
+      <span class="conn-account" id="calAccount">Not connected</span>
+      <span class="conn-actions">
+        <button type="button" class="btn" id="calConnect">Connect</button>
+        <button type="button" class="btn" id="calRefresh">Refresh</button>
+      </span>
+    </div>
+    <div class="cal-list" id="calList"></div>
+    <p class="field-note">
+      New calendars you create or subscribe to show up here on their own and follow their
+      visibility in Google Calendar until you tick or untick them.
+    </p>
+    <div class="status" id="calStatus">Saved</div>
+  </div>
+  <div class="card">
+    <h1>New Tab Widgets</h1>
+    <p class="sub">Clock, Google Calendar, and Notion tasks on the new tab page</p>
+    <label class="toggle-row" for="widgetClock">
+      <span>Clock &amp; date</span>
+      <input type="checkbox" id="widgetClock">
+    </label>
+    <label class="toggle-row" for="widgetCalendar">
+      <span>Calendar events</span>
+      <input type="checkbox" id="widgetCalendar">
+    </label>
+    <label class="toggle-row" for="widgetTasks">
+      <span>Notion tasks</span>
+      <input type="checkbox" id="widgetTasks">
+    </label>
+    <div class="field">
+      <label for="googleAccountEmail">Google account email</label>
+      <input type="text" id="googleAccountEmail" placeholder="you@gmail.com" autocomplete="off">
+      <p class="field-note">Pre-selects this account on the Google sign-in screen. Leave empty to pick from all accounts each time.</p>
+    </div>
+    <div class="field">
+      <label for="notionToken">Notion integration token</label>
+      <input type="password" id="notionToken" placeholder="ntn_…" autocomplete="off">
+      <p class="field-note">Stored only on this device (never synced). Create one at notion.so/my-integrations, then share your Task Tracker database with it.</p>
+    </div>
+    <div class="field">
+      <label for="notionDataSourceId">Notion data source ID</label>
+      <input type="text" id="notionDataSourceId" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="notionDatabaseId">Notion database ID</label>
+      <input type="text" id="notionDatabaseId" autocomplete="off">
+    </div>
+    <div class="status" id="widgetStatus">Saved</div>
+  </div>
+  <script src="gcal.js"></script>
   <script src="options.js"></script>
   <script src="content.js"></script>
 </body>
