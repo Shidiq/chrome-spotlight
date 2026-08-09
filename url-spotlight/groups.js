@@ -1,28 +1,12 @@
 (() => {
-  const GROUP_COLORS = {
-    grey: { dark: "#9aa0a6", light: "#5f6368" },
-    blue: { dark: "#8ab4f8", light: "#1a73e8" },
-    red: { dark: "#f28b82", light: "#d93025" },
-    yellow: { dark: "#fdd663", light: "#f9ab00" },
-    green: { dark: "#81c995", light: "#188038" },
-    pink: { dark: "#ff8bcb", light: "#d01884" },
-    purple: { dark: "#c58af9", light: "#a142f4" },
-    cyan: { dark: "#78d9ec", light: "#007b83" },
-    orange: { dark: "#fcad70", light: "#fa903e" }
-  };
-  const isLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+  const tg = self.SpTabGroups;
 
   const listEl = document.getElementById("list");
   let items = []; // open groups ({kind:"open",...}) then closed ones ({kind:"closed",...})
   let selectedIdx = 0;
 
-  function dotColor(name) {
-    const pair = GROUP_COLORS[name] || GROUP_COLORS.grey;
-    return isLight ? pair.light : pair.dark;
-  }
-
   function load() {
-    if (!chrome.tabGroups) {
+    if (!tg.supported()) {
       listEl.textContent = "";
       const empty = document.createElement("div");
       empty.className = "empty";
@@ -30,57 +14,10 @@
       listEl.appendChild(empty);
       return;
     }
-    chrome.tabGroups.query({}, (gs) => {
-      if (chrome.runtime.lastError) {
-        void chrome.runtime.lastError;
-        gs = [];
-      }
-      chrome.tabs.query({}, (ts) => {
-        if (chrome.runtime.lastError) {
-          void chrome.runtime.lastError;
-          ts = [];
-        }
-        chrome.storage.local.get("closedGroups", (store) => {
-          void chrome.runtime.lastError;
-          const closed = (store && store.closedGroups) || [];
-
-          // tabs.query returns tabs in tab-strip order, so the first tab seen
-          // per group is the group's leftmost tab.
-          const info = new Map();
-          for (const t of ts) {
-            if (t.groupId == null || t.groupId === -1) continue;
-            const entry = info.get(t.groupId);
-            if (entry) entry.tabCount += 1;
-            else info.set(t.groupId, { tabCount: 1, firstTabId: t.id });
-          }
-          const open = gs.map((g) => {
-            const extra = info.get(g.id) || { tabCount: 0, firstTabId: null };
-            return {
-              kind: "open",
-              id: g.id,
-              title: g.title || "",
-              color: g.color,
-              windowId: g.windowId,
-              tabCount: extra.tabCount,
-              firstTabId: extra.firstTabId
-            };
-          });
-          open.sort((a, b) => a.windowId - b.windowId);
-
-          items = open.concat(
-            closed.map((e) => ({
-              kind: "closed",
-              title: e.title || "",
-              color: e.color,
-              urls: e.urls || [],
-              tabCount: (e.urls || []).length,
-              closedAt: e.closedAt
-            }))
-          );
-          if (selectedIdx >= items.length) selectedIdx = Math.max(0, items.length - 1);
-          render();
-        });
-      });
+    tg.load().then((next) => {
+      items = next;
+      if (selectedIdx >= items.length) selectedIdx = Math.max(0, items.length - 1);
+      render();
     });
   }
 
@@ -131,7 +68,7 @@
 
       const dot = document.createElement("span");
       dot.className = "dot";
-      dot.style.background = dotColor(it.color);
+      dot.style.background = tg.dotColor(it.color);
 
       const title = document.createElement("span");
       title.className = "title" + (it.title ? "" : " untitled");
@@ -171,54 +108,9 @@
   }
 
   function activate(it) {
-    if (it.kind === "open") focusGroup(it);
-    else restoreGroup(it);
-  }
-
-  function focusGroup(g) {
-    // Uncollapse first so activating the tab doesn't race the collapse state.
-    chrome.tabGroups.update(g.id, { collapsed: false }, () => {
-      if (chrome.runtime.lastError) {
-        void chrome.runtime.lastError;
-        load(); // group vanished since render — refresh the list
-        return;
-      }
-      const focusWindow = () => {
-        chrome.windows.update(g.windowId, { focused: true }, () => {
-          void chrome.runtime.lastError;
-          window.close();
-        });
-      };
-      if (g.firstTabId != null) {
-        chrome.tabs.update(g.firstTabId, { active: true }, () => {
-          void chrome.runtime.lastError;
-          focusWindow();
-        });
-      } else {
-        focusWindow();
-      }
-    });
-  }
-
-  function restoreGroup(entry) {
-    if (!entry.urls.length) return;
-    // Restore runs in the background worker: this popup document dies the
-    // moment focus shifts, which would abort mid-restore.
-    chrome.runtime.sendMessage(
-      {
-        type: "RESTORE_GROUP",
-        entry: {
-          title: entry.title,
-          color: entry.color,
-          urls: entry.urls,
-          closedAt: entry.closedAt
-        }
-      },
-      () => {
-        void chrome.runtime.lastError;
-      }
-    );
-    window.close();
+    // The popup closes once the group is focused or the restore is queued; if
+    // the group vanished since render, refresh instead.
+    tg.activate(it, () => window.close(), load);
   }
 
   document.addEventListener("keydown", (e) => {

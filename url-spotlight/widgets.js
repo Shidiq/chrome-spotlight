@@ -10,6 +10,7 @@
     widgetClock: true,
     widgetCalendar: true,
     widgetTasks: true,
+    widgetTabGroups: true,
     notionDatabaseId: "77c516e8-c36c-4226-9d1f-0d682c5e97f5",
     notionDataSourceId: "7ae3b9f2-031c-4587-98a1-8feae61eba98",
   };
@@ -18,6 +19,7 @@
   const GCAL_SYNC_KEYS = ["googleAccounts", "calendarOverrides"];
   const CACHE_KEY = "widgetsCache";
   const TOKEN_KEY = "notionToken";
+  const CLOSED_GROUPS_KEY = "closedGroups";
   const REFRESH_MS = 5 * 60 * 1000;
 
   function loadConfig() {
@@ -42,26 +44,87 @@
     chrome.storage.local.set({ [CACHE_KEY]: cache });
   }
 
-  // ----------------------------------------------------------------- clock
+  // ------------------------------------------------------ clock and up next
 
+  const fmtClockTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const fmtClockDate = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+  // One timer drives both the clock and the "in 2h 15m" countdown, so the
+  // countdown stays live between the 5-minute calendar refreshes.
   let clockTimer = null;
-  function startClock(root) {
+  const tickers = [];
+
+  function runTickers() {
+    const now = new Date();
+    for (const fn of tickers) fn(now);
+  }
+
+  function startTicker() {
     clearInterval(clockTimer);
+    runTickers();
+    clockTimer = setInterval(runTickers, 1000);
+  }
+
+  function buildClock(head) {
     const wrap = el("div", "sp-clock");
     const time = el("div", "sp-clock-time");
     const date = el("div", "sp-clock-date");
     wrap.append(time, date);
-    root.appendChild(wrap);
+    head.appendChild(wrap);
+    tickers.push((now) => {
+      time.textContent = fmtClockTime.format(now);
+      date.textContent = fmtClockDate.format(now);
+    });
+  }
 
-    const fmtTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
-    const fmtDate = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-    const tick = () => {
-      const now = new Date();
-      time.textContent = fmtTime.format(now);
-      date.textContent = fmtDate.format(now);
-    };
-    tick();
-    clockTimer = setInterval(tick, 1000);
+  const fmtNextTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const fmtNextDay = new Intl.DateTimeFormat(undefined, { weekday: "long" });
+
+  function dayOffset(from, to) {
+    const a = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+    const b = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+    return Math.round((b - a) / 86400000);
+  }
+
+  // "Tomorrow 08:00 · in 19h" — the day part is absolute so it stays readable
+  // for far-off events, the countdown is relative so near ones feel urgent.
+  function describeWhen(ev, now) {
+    const start = new Date(ev.start);
+    const days = dayOffset(now, start);
+    const when = days === 0 ? "Today" : days === 1 ? "Tomorrow" : fmtNextDay.format(start);
+    const at = ev.allDay ? "all day" : fmtNextTime.format(start);
+    if (ev.allDay) return `${when}, ${at}`;
+
+    const mins = Math.round((start - now) / 60000);
+    if (mins <= 0) return `${when} ${at} · now`;
+    let left;
+    if (mins < 60) left = `in ${mins}m`;
+    else if (mins < 24 * 60) {
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      left = m ? `in ${h}h ${m}m` : `in ${h}h`;
+    } else left = `in ${Math.round(mins / (24 * 60))}d`;
+    return `${when} ${at} · ${left}`;
+  }
+
+  function buildNext(head) {
+    const wrap = el("div", "sp-next");
+    wrap.appendChild(el("div", "sp-next-label", "Up next"));
+    const title = el("div", "sp-next-title");
+    const when = el("div", "sp-next-when");
+    wrap.append(title, when);
+    wrap.style.display = "none";
+    head.appendChild(wrap);
+    tickers.push((now) => {
+      const ev = nextEvent;
+      if (!ev) {
+        wrap.style.display = "none";
+        return;
+      }
+      wrap.style.display = "";
+      title.textContent = ev.title;
+      when.textContent = describeWhen(ev, now);
+    });
   }
 
   // ------------------------------------------------------- calendar client
@@ -204,23 +267,37 @@
     return row;
   }
 
-  function renderEventList(body, events, { grouped, emptyText }) {
+  function dayHeader(d, todayKey) {
+    const isToday = dayKey(d) === todayKey;
+    return el("div", "sp-day-header" + (isToday ? " sp-today" : ""), isToday ? "Today" : fmtWeekday.format(d));
+  }
+
+  // One list, grouped by day. Today always gets a header even with no events
+  // so the agenda keeps its "you are here" anchor.
+  function renderAgenda(body, events, todayCount) {
     body.textContent = "";
+    const now = new Date();
+    const todayKey = dayKey(now);
+
     if (!events.length) {
-      body.appendChild(el("div", "sp-empty", emptyText));
+      body.appendChild(dayHeader(now, todayKey));
+      body.appendChild(el("div", "sp-empty", "Nothing scheduled this week"));
       return;
     }
-    if (!grouped) {
-      for (const ev of events) body.appendChild(eventRow(ev));
-      return;
-    }
+    // No events today: emit the header up front and pre-seed lastKey so the
+    // loop doesn't emit a second one.
     let lastKey = "";
+    if (!todayCount) {
+      body.appendChild(dayHeader(now, todayKey));
+      body.appendChild(el("div", "sp-empty", "No events"));
+      lastKey = todayKey;
+    }
     for (const ev of events) {
       const d = new Date(ev.start);
       const key = dayKey(d);
       if (key !== lastKey) {
         lastKey = key;
-        body.appendChild(el("div", "sp-day-header", fmtWeekday.format(d)));
+        body.appendChild(dayHeader(d, todayKey));
       }
       body.appendChild(eventRow(ev));
     }
@@ -319,43 +396,108 @@
     body.appendChild(btn);
   }
 
+  // ---------------------------------------------------------- tab groups
+
+  const tabGroups = self.SpTabGroups;
+
+  function groupRow(item, onChanged) {
+    const row = el("button", "sp-row sp-group" + (item.kind === "closed" ? " closed" : ""));
+    const dot = el("span", "sp-event-dot");
+    dot.style.background = tabGroups.dotColor(item.color);
+    const title = el("span", "sp-group-title" + (item.title ? "" : " untitled"), item.title || "Untitled group");
+    const count = el("span", "sp-chip", item.tabCount === 1 ? "1 tab" : `${item.tabCount} tabs`);
+    row.append(dot, title, count);
+    row.title = item.kind === "closed" ? "Restore group" : "Go to group";
+    // Focusing a group moves the browser away from this tab, so nothing to do
+    // on success; onChanged only fires when the group turned out to be gone.
+    row.addEventListener("click", () => tabGroups.activate(item, () => {}, onChanged));
+    return row;
+  }
+
+  function renderGroups(cardRef, items, onChanged) {
+    const body = cardRef.body;
+    body.textContent = "";
+    if (!items.length) {
+      body.appendChild(el("div", "sp-empty", "No tab groups"));
+      body.appendChild(el("div", "sp-hint", "Right-click a tab → Add tab to new group"));
+      return;
+    }
+    const hasClosed = items.some((it) => it.kind === "closed");
+    let closedLabelDone = false;
+    items.forEach((it, i) => {
+      if (hasClosed && i === 0 && it.kind === "open") {
+        body.appendChild(el("div", "sp-day-header", "Open groups"));
+      }
+      if (it.kind === "closed" && !closedLabelDone) {
+        closedLabelDone = true;
+        body.appendChild(el("div", "sp-day-header", "Recently closed"));
+      }
+      body.appendChild(groupRow(it, onChanged));
+    });
+  }
+
   // -------------------------------------------------------------- scheduler
 
   let cfg = null;
   let root = null;
-  let todayCard = null;
-  let weekCard = null;
+  let agendaCard = null;
   let tasksCard = null;
+  let groupsCard = null;
+  let nextEvent = null;
   let lastFetch = { calendar: 0, tasks: 0 };
 
   function renderShell() {
     root.textContent = "";
-    if (cfg.widgetClock) startClock(root);
+    tickers.length = 0;
+    agendaCard = tasksCard = groupsCard = null;
+    nextEvent = null;
 
-    const left = el("div", "sp-col");
-    const right = el("div", "sp-col");
-    todayCard = weekCard = tasksCard = null;
+    const head = el("div", "sp-head");
+    if (cfg.widgetClock) buildClock(head);
+    if (cfg.widgetCalendar) buildNext(head);
+    if (head.childNodes.length) {
+      root.appendChild(head);
+      startTicker();
+    } else {
+      clearInterval(clockTimer);
+    }
+    // Without a header row the columns would land in the auto-sized first
+    // track and grow past the viewport instead of scrolling internally.
+    root.dataset.head = head.childNodes.length ? "1" : "0";
 
+    const cols = [];
     if (cfg.widgetCalendar) {
-      todayCard = card("Today");
-      weekCard = card("This week", true);
-      left.append(todayCard.root, weekCard.root);
-      todayCard.body.appendChild(el("div", "sp-empty", "Loading…"));
+      agendaCard = card("Agenda", true);
+      agendaCard.body.appendChild(el("div", "sp-empty", "Loading…"));
+      cols.push(["sp-col-agenda", agendaCard.root]);
     }
     if (cfg.widgetTasks) {
       tasksCard = card("Tasks", true);
-      right.appendChild(tasksCard.root);
       tasksCard.body.appendChild(el("div", "sp-empty", "Loading…"));
+      cols.push(["sp-col-tasks", tasksCard.root]);
     }
-    if (left.childNodes.length) root.appendChild(left);
-    if (right.childNodes.length) root.appendChild(right);
+    if (cfg.widgetTabGroups) {
+      groupsCard = card("Tab groups", true);
+      groupsCard.body.appendChild(el("div", "sp-empty", "Loading…"));
+      cols.push(["sp-col-side", groupsCard.root]);
+    }
+    for (const [cls, node] of cols) {
+      const col = el("div", "sp-col " + cls);
+      col.appendChild(node);
+      root.appendChild(col);
+    }
+    // Columns are auto-placed; the CSS needs the count to size the tracks.
+    root.dataset.cols = String(cols.length);
   }
 
   function renderCalendarData(events) {
-    if (!todayCard) return;
+    if (!agendaCard) return;
     const { today, week } = splitEvents(events);
-    renderEventList(todayCard.body, today, { grouped: false, emptyText: "No events today" });
-    renderEventList(weekCard.body, week, { grouped: true, emptyText: "Nothing coming up this week" });
+    const all = today.concat(week);
+    nextEvent = all.find((ev) => !ev.allDay && new Date(ev.start) > new Date()) || all[0] || null;
+    renderAgenda(agendaCard.body, all, today.length);
+    setNote(agendaCard, `${today.length} today · ${week.length} this week`);
+    runTickers(); // paint "Up next" now instead of waiting for the next second
   }
 
   // Re-listing the calendars on every refresh is the whole sync mechanism: a
@@ -403,15 +545,14 @@
   }
 
   async function refreshCalendar() {
-    if (!todayCard) return;
+    if (!agendaCard) return;
     // Connecting needs Google's account picker, which belongs on the settings
     // page next to the per-account calendar lists.
     const openSettings = () => chrome.runtime.openOptionsPage();
 
     const accounts = await gcal.listAccounts();
     if (!accounts.length) {
-      renderConnectButton(todayCard.body, openSettings);
-      renderConnectButton(weekCard.body, openSettings);
+      renderConnectButton(agendaCard.body, openSettings);
       return;
     }
 
@@ -423,15 +564,14 @@
       const note = failed.every((r) => r.auth) ? "Reconnect needed" : "Couldn't refresh";
       const cached = cache.calendar && cache.calendar.events;
       if (cached && cached.length) {
-        setNote(todayCard, note);
+        // after renderCalendarData, which sets its own count note
         renderCalendarData(cached);
+        setNote(agendaCard, note);
       } else if (failed.every((r) => r.auth)) {
-        renderConnectButton(todayCard.body, openSettings);
-        renderConnectButton(weekCard.body, openSettings);
+        renderConnectButton(agendaCard.body, openSettings);
       } else {
-        todayCard.body.textContent = "";
-        todayCard.body.appendChild(el("div", "sp-empty", "Couldn't load events"));
-        weekCard.body.textContent = "";
+        agendaCard.body.textContent = "";
+        agendaCard.body.appendChild(el("div", "sp-empty", "Couldn't load events"));
       }
       return;
     }
@@ -439,9 +579,8 @@
     const events = mergeEvents(results);
     lastFetch.calendar = Date.now();
     saveCache({ calendar: { fetchedAt: lastFetch.calendar, events } });
-    setNote(todayCard, failed.length ? `Reconnect ${failed.map((r) => r.accountId).join(", ")}` : "");
-    setNote(weekCard, "");
     renderCalendarData(events);
+    if (failed.length) setNote(agendaCard, `Reconnect ${failed.map((r) => r.accountId).join(", ")}`);
   }
 
   async function refreshTasks() {
@@ -479,9 +618,22 @@
     }
   }
 
+  async function refreshGroups() {
+    if (!groupsCard) return;
+    if (!tabGroups.supported()) {
+      groupsCard.body.textContent = "";
+      groupsCard.body.appendChild(el("div", "sp-hint", "Tab groups aren't supported in this browser."));
+      return;
+    }
+    const items = await tabGroups.load();
+    if (!groupsCard) return;
+    renderGroups(groupsCard, items, refreshGroups);
+  }
+
   function refreshAll() {
     refreshCalendar();
     refreshTasks();
+    refreshGroups();
   }
 
   async function init() {
@@ -492,7 +644,7 @@
     renderShell();
 
     // stale-while-revalidate: paint cached data immediately
-    if (todayCard && cache.calendar && cache.calendar.events) renderCalendarData(cache.calendar.events);
+    if (agendaCard && cache.calendar && cache.calendar.events) renderCalendarData(cache.calendar.events);
     if (tasksCard && cache.tasks && cache.tasks.items && cfg.notionToken) renderTasks(tasksCard, cache.tasks.items, cfg);
 
     refreshAll();
@@ -500,12 +652,20 @@
 
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState !== "visible") return;
+      // Groups are local and cheap, and change while this tab sits in the
+      // background — re-read them every time rather than on the 5-min cycle.
+      refreshGroups();
       const stale = Math.min(lastFetch.calendar, lastFetch.tasks) < Date.now() - REFRESH_MS;
-      if (stale) refreshAll();
+      if (stale) {
+        refreshCalendar();
+        refreshTasks();
+      }
     });
 
     chrome.storage.onChanged.addListener(async (changes, area) => {
       const keys = Object.keys(changes);
+      // The archive is written by the worker whenever a group closes.
+      if (area === "local" && keys.includes(CLOSED_GROUPS_KEY)) refreshGroups();
       const relevant =
         (area === "sync" && keys.some((k) => k in SYNC_DEFAULTS || GCAL_SYNC_KEYS.includes(k))) ||
         (area === "local" && keys.includes(TOKEN_KEY));

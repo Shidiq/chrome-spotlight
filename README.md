@@ -26,7 +26,20 @@ Chrome/Helium extension. One macOS-style Spotlight overlay for URL navigation, s
 ## Restricted pages & new tab
 
 - On pages content scripts can't reach (`chrome://`, Web Store, etc.) the shortcut opens the same overlay in a small popup window instead — same keys, same behavior
-- The new-tab page shows the overlay directly
+- The new-tab page shows the overlay directly, over the widgets below
+
+## New tab widgets
+
+Three columns over an animated aurora background, capped at 1440px and centered so rows don't stretch on a wide display. Each card sizes to its content and scrolls internally once it outgrows the column. Every widget can be switched off individually in the extension's options page.
+
+- **Clock and Up next** — time and date top-left; the next upcoming calendar event with a live countdown top-right
+- **Agenda** — one grouped list from Google Calendar covering today through the next 8 days, with `Today` always shown as the anchor even when it's empty. Connect one or more Google accounts and pick which calendars appear, per account, in the options page
+- **Tasks** — open items from a Notion database, sorted by priority then due date, with overdue dates flagged. Click the checkbox to mark one Done in Notion. Needs a Notion integration token, pasted in the options page and stored on this device only
+- **Tab groups** — open groups and recently closed ones, same data as the toolbar popup below; click to jump to a group or restore a closed one
+
+Calendar and task data are cached, so the page paints immediately and refreshes in the background every 5 minutes. Tab groups re-read every time the tab becomes visible.
+
+At narrower widths the layout drops to two columns (tab groups spans the bottom), then to one.
 
 ## Tab groups popup
 
