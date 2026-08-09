@@ -12,11 +12,10 @@
     widgetTasks: true,
     notionDatabaseId: "77c516e8-c36c-4226-9d1f-0d682c5e97f5",
     notionDataSourceId: "7ae3b9f2-031c-4587-98a1-8feae61eba98",
-    googleAccountEmail: "",
-    // Sparse map of explicit picks from settings; ids absent from it inherit
-    // the calendar's own visibility in Google.
-    calendarOverrides: {},
   };
+  // Connected accounts and their calendar picks live in gcal.js, which reads
+  // them per account; they are watched here only to re-render on change.
+  const GCAL_SYNC_KEYS = ["googleAccounts", "calendarOverrides"];
   const CACHE_KEY = "widgetsCache";
   const TOKEN_KEY = "notionToken";
   const REFRESH_MS = 5 * 60 * 1000;
@@ -361,55 +360,88 @@
 
   // Re-listing the calendars on every refresh is the whole sync mechanism: a
   // calendar created or subscribed to in Google turns up within one cycle.
-  async function resolveCalendars(token, loginHint) {
+  async function resolveCalendars(accountId, token) {
     let items;
     try {
-      items = await gcal.fetchCalendarList(token, loginHint);
+      items = await gcal.fetchCalendarList(accountId, token);
     } catch (e) {
       if (e && e.status === 401) throw e;
-      items = await gcal.loadCachedList();
+      items = await gcal.loadCachedList(accountId);
       if (!items.length) throw e;
     }
-    return gcal.resolveSelected(items, cfg.calendarOverrides || {});
+    return gcal.resolveSelected(items, await gcal.loadOverrides(accountId));
   }
 
-  async function refreshCalendar(interactive) {
-    if (!todayCard) return;
-    const loginHint = cfg.googleAccountEmail;
-    const token = await gcal.getGoogleToken(interactive, loginHint);
-    if (!token) {
-      const hasCache = cache.calendar && cache.calendar.events && cache.calendar.events.length;
-      if (!hasCache) {
-        const connect = () => refreshCalendar(true);
-        renderConnectButton(todayCard.body, connect);
-        renderConnectButton(weekCard.body, connect);
-      } else {
-        setNote(todayCard, "Reconnect needed");
+  // `auth` separates "this account needs reconnecting" from "the network is
+  // down", which want different notes.
+  async function fetchAccountEvents(accountId) {
+    try {
+      const token = await gcal.getGoogleToken(accountId, false);
+      if (!token) return { accountId, failed: true, auth: true };
+      const calendars = await resolveCalendars(accountId, token);
+      return { accountId, events: await gcal.fetchCalendarEvents(accountId, token, calendars) };
+    } catch (e) {
+      return { accountId, failed: true, auth: !!(e && e.status === 401) };
+    }
+  }
+
+  // A calendar shared with two connected accounts returns the same event once
+  // per account; keep the first copy so it shows up as a single row.
+  function mergeEvents(perAccount) {
+    const seen = new Set();
+    const events = [];
+    for (const r of perAccount) {
+      for (const ev of r.events || []) {
+        const key = `${ev.id}|${ev.start}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        events.push(ev);
       }
+    }
+    events.sort((a, b) => new Date(a.start) - new Date(b.start));
+    return events;
+  }
+
+  async function refreshCalendar() {
+    if (!todayCard) return;
+    // Connecting needs Google's account picker, which belongs on the settings
+    // page next to the per-account calendar lists.
+    const openSettings = () => chrome.runtime.openOptionsPage();
+
+    const accounts = await gcal.listAccounts();
+    if (!accounts.length) {
+      renderConnectButton(todayCard.body, openSettings);
+      renderConnectButton(weekCard.body, openSettings);
       return;
     }
-    try {
-      const calendars = await resolveCalendars(token, loginHint);
-      const events = await gcal.fetchCalendarEvents(token, loginHint, calendars);
-      lastFetch.calendar = Date.now();
-      saveCache({ calendar: { fetchedAt: lastFetch.calendar, events } });
-      setNote(todayCard, "");
-      setNote(weekCard, "");
-      renderCalendarData(events);
-    } catch (e) {
-      if (e && e.status === 401) {
-        const connect = () => refreshCalendar(true);
-        renderConnectButton(todayCard.body, connect);
-        renderConnectButton(weekCard.body, connect);
-      } else if (cache.calendar && cache.calendar.events) {
-        setNote(todayCard, "Couldn't refresh");
-        renderCalendarData(cache.calendar.events);
+
+    // One account failing must not cost the others their events.
+    const results = await Promise.all(accounts.map((a) => fetchAccountEvents(a.id)));
+    const failed = results.filter((r) => r.failed);
+
+    if (failed.length === results.length) {
+      const note = failed.every((r) => r.auth) ? "Reconnect needed" : "Couldn't refresh";
+      const cached = cache.calendar && cache.calendar.events;
+      if (cached && cached.length) {
+        setNote(todayCard, note);
+        renderCalendarData(cached);
+      } else if (failed.every((r) => r.auth)) {
+        renderConnectButton(todayCard.body, openSettings);
+        renderConnectButton(weekCard.body, openSettings);
       } else {
         todayCard.body.textContent = "";
         todayCard.body.appendChild(el("div", "sp-empty", "Couldn't load events"));
         weekCard.body.textContent = "";
       }
+      return;
     }
+
+    const events = mergeEvents(results);
+    lastFetch.calendar = Date.now();
+    saveCache({ calendar: { fetchedAt: lastFetch.calendar, events } });
+    setNote(todayCard, failed.length ? `Reconnect ${failed.map((r) => r.accountId).join(", ")}` : "");
+    setNote(weekCard, "");
+    renderCalendarData(events);
   }
 
   async function refreshTasks() {
@@ -448,7 +480,7 @@
   }
 
   function refreshAll() {
-    refreshCalendar(false);
+    refreshCalendar();
     refreshTasks();
   }
 
@@ -475,7 +507,7 @@
     chrome.storage.onChanged.addListener(async (changes, area) => {
       const keys = Object.keys(changes);
       const relevant =
-        (area === "sync" && keys.some((k) => k in SYNC_DEFAULTS)) ||
+        (area === "sync" && keys.some((k) => k in SYNC_DEFAULTS || GCAL_SYNC_KEYS.includes(k))) ||
         (area === "local" && keys.includes(TOKEN_KEY));
       if (!relevant) return;
       cfg = await loadConfig();

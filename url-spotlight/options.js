@@ -116,10 +116,9 @@ taskViewShortcutReset.addEventListener("click", () => {
 
 // --- Google Calendar picker ---
 
-const calAccountEl = document.getElementById("calAccount");
-const calConnectBtn = document.getElementById("calConnect");
-const calRefreshBtn = document.getElementById("calRefresh");
-const calListEl = document.getElementById("calList");
+const calAccountsEl = document.getElementById("calAccounts");
+const calAddBtn = document.getElementById("calAdd");
+const calClientIdInput = document.getElementById("calClientId");
 const calStatus = document.getElementById("calStatus");
 
 let calStatusTimer = null;
@@ -130,27 +129,25 @@ function showCalSaved(text) {
   calStatusTimer = setTimeout(() => calStatus.classList.remove("show"), 1500);
 }
 
-let calItems = [];
-let calOverrides = {};
-let calConnected = false;
-let calChecked = false; // has a silent token check finished yet
-let calLoginHint = "";
+// One entry per connected account: { id, items, overrides, connected, checked, busy }.
+// Nothing is shared between accounts — each has its own list and its own picks.
+let accounts = [];
 
-function renderCalList() {
-  calListEl.textContent = "";
-  if (!calItems.length) {
+function calListFor(acct) {
+  const listEl = document.createElement("div");
+  listEl.className = "cal-list";
+
+  if (!acct.items.length) {
     const empty = document.createElement("div");
     empty.className = "cal-empty";
-    empty.textContent = calConnected
-      ? "No calendars on this account."
-      : "Connect to pick which calendars appear on the new tab.";
-    calListEl.appendChild(empty);
-    return;
+    empty.textContent = acct.connected ? "No calendars on this account." : "Reconnect to load calendars.";
+    listEl.appendChild(empty);
+    return listEl;
   }
 
-  const selected = new Set(SpGCal.resolveSelected(calItems, calOverrides).map((c) => c.id));
+  const selected = new Set(SpGCal.resolveSelected(acct.items, acct.overrides).map((c) => c.id));
 
-  for (const cal of calItems) {
+  for (const cal of acct.items) {
     const row = document.createElement("label");
     row.className = "cal-row";
 
@@ -176,72 +173,148 @@ function renderCalList() {
     }
 
     check.addEventListener("change", async () => {
-      calOverrides[cal.id] = check.checked;
-      await SpGCal.setOverride(cal.id, check.checked);
+      acct.overrides[cal.id] = check.checked;
+      await SpGCal.setOverride(acct.id, cal.id, check.checked);
       showCalSaved();
     });
 
-    calListEl.appendChild(row);
+    listEl.appendChild(row);
   }
+  return listEl;
 }
 
-function renderCalConnection() {
-  const primary = calItems.find((c) => c.primary);
-  if (!calChecked) {
-    calAccountEl.textContent = "Checking…";
-  } else if (calConnected) {
-    calAccountEl.textContent = primary ? `Connected as ${primary.id}` : "Connected";
-  } else {
-    calAccountEl.textContent = "Not connected";
+function accountBlock(acct) {
+  const wrap = document.createElement("div");
+  wrap.className = "cal-account";
+
+  const row = document.createElement("div");
+  row.className = "conn-row";
+
+  const name = document.createElement("span");
+  name.className = "conn-account";
+  name.textContent = acct.id;
+  if (!acct.checked) name.textContent += " · checking…";
+  else if (!acct.connected) name.textContent += " · reconnect needed";
+
+  const actions = document.createElement("span");
+  actions.className = "conn-actions";
+
+  if (acct.clientId) {
+    const badge = document.createElement("span");
+    badge.className = "cal-client";
+    badge.textContent = "own client ID";
+    badge.title = acct.clientId;
+    actions.appendChild(badge);
   }
-  calConnectBtn.textContent = calConnected ? "Reconnect" : "Connect";
-  calRefreshBtn.hidden = !calConnected;
+
+  const reload = document.createElement("button");
+  reload.type = "button";
+  reload.className = "btn";
+  reload.textContent = acct.connected ? "Refresh" : "Reconnect";
+  reload.disabled = acct.busy;
+  reload.addEventListener("click", () => loadAccount(acct, !acct.connected));
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "btn";
+  remove.textContent = "Remove";
+  remove.disabled = acct.busy;
+  remove.addEventListener("click", async () => {
+    if (!confirm(`Remove ${acct.id}? Its calendar choices are discarded.`)) return;
+    await SpGCal.removeAccount(acct.id);
+    accounts = accounts.filter((a) => a.id !== acct.id);
+    renderAccounts();
+    showCalSaved("Removed");
+  });
+
+  actions.append(reload, remove);
+  row.append(name, actions);
+  wrap.append(row, calListFor(acct));
+  return wrap;
 }
 
-async function loadCalendars(interactive) {
-  calRefreshBtn.disabled = true;
-  calConnectBtn.disabled = true;
+function renderAccounts() {
+  calAccountsEl.textContent = "";
+  if (!accounts.length) {
+    const empty = document.createElement("div");
+    empty.className = "cal-empty";
+    empty.textContent = "No account connected. Add one to pick which calendars appear on the new tab.";
+    calAccountsEl.appendChild(empty);
+    return;
+  }
+  for (const acct of accounts) calAccountsEl.appendChild(accountBlock(acct));
+}
+
+async function loadAccount(acct, interactive) {
+  acct.busy = true;
+  renderAccounts();
   try {
-    const token = await SpGCal.getGoogleToken(interactive, calLoginHint);
-    calConnected = !!token;
-    calChecked = true;
+    const token = await SpGCal.getGoogleToken(acct.id, interactive);
+    acct.connected = !!token;
     if (!token) {
       if (interactive) showCalSaved("Couldn't connect");
-      renderCalConnection();
-      renderCalList();
       return;
     }
-    calItems = await SpGCal.fetchCalendarList(token, calLoginHint);
-    calOverrides = await SpGCal.loadOverrides(); // fetch prunes calendars that are gone
-    renderCalConnection();
-    renderCalList();
+    acct.items = await SpGCal.fetchCalendarList(acct.id, token);
+    acct.overrides = await SpGCal.loadOverrides(acct.id); // fetch prunes calendars that are gone
   } catch (e) {
     if (e && e.status === 401) {
-      await SpGCal.clearCachedToken();
-      calConnected = false;
+      await SpGCal.clearToken(acct.id);
+      acct.connected = false;
     }
     showCalSaved("Couldn't load calendars");
-    renderCalConnection();
-    renderCalList();
   } finally {
-    calRefreshBtn.disabled = false;
-    calConnectBtn.disabled = false;
+    acct.busy = false;
+    acct.checked = true;
+    renderAccounts();
   }
 }
 
-calConnectBtn.addEventListener("click", () => loadCalendars(true));
-calRefreshBtn.addEventListener("click", () => loadCalendars(false));
+calAddBtn.addEventListener("click", async () => {
+  calAddBtn.disabled = true;
+  const clientId = calClientIdInput.value.trim();
+  try {
+    const added = await SpGCal.addAccount(clientId);
+    if (!added) {
+      showCalSaved("Couldn't connect");
+      return;
+    }
+    let acct = accounts.find((a) => a.id === added.id);
+    if (!acct) {
+      acct = { id: added.id, items: [], overrides: {}, connected: false, checked: false, busy: false };
+      accounts.push(acct);
+    }
+    acct.clientId = clientId;
+    acct.items = added.items;
+    calClientIdInput.value = "";
+    acct.overrides = await SpGCal.loadOverrides(added.id);
+    acct.connected = true;
+    acct.checked = true;
+    renderAccounts();
+    showCalSaved(added.alreadyAdded ? "Already connected" : "Added");
+  } catch (e) {
+    showCalSaved(e && e.reason === "no-primary" ? "Couldn't identify that account" : "Couldn't connect");
+  } finally {
+    calAddBtn.disabled = false;
+  }
+});
 
-// Paint the cached list first, then revalidate silently.
+// Paint every account's cached list first, then revalidate them all silently.
 (async () => {
-  calOverrides = await SpGCal.loadOverrides();
-  calItems = await SpGCal.loadCachedList();
-  renderCalConnection();
-  renderCalList();
-  chrome.storage.sync.get({ googleAccountEmail: "" }, (r) => {
-    calLoginHint = r.googleAccountEmail;
-    loadCalendars(false);
-  });
+  const stored = await SpGCal.listAccounts();
+  accounts = await Promise.all(
+    stored.map(async (a) => ({
+      id: a.id,
+      clientId: a.clientId || "",
+      items: await SpGCal.loadCachedList(a.id),
+      overrides: await SpGCal.loadOverrides(a.id),
+      connected: false,
+      checked: false,
+      busy: false,
+    }))
+  );
+  renderAccounts();
+  await Promise.all(accounts.map((a) => loadAccount(a, false)));
 })();
 
 // --- New Tab Widgets ---
@@ -252,7 +325,6 @@ const WIDGET_SYNC_DEFAULTS = {
   widgetTasks: true,
   notionDatabaseId: "77c516e8-c36c-4226-9d1f-0d682c5e97f5",
   notionDataSourceId: "7ae3b9f2-031c-4587-98a1-8feae61eba98",
-  googleAccountEmail: "",
 };
 
 const widgetStatus = document.getElementById("widgetStatus");
@@ -265,9 +337,7 @@ function showWidgetSaved() {
 
 const widgetToggles = ["widgetClock", "widgetCalendar", "widgetTasks"].map((id) => document.getElementById(id));
 const notionTokenInput = document.getElementById("notionToken");
-const widgetTextInputs = ["googleAccountEmail", "notionDatabaseId", "notionDataSourceId"].map((id) =>
-  document.getElementById(id)
-);
+const widgetTextInputs = ["notionDatabaseId", "notionDataSourceId"].map((id) => document.getElementById(id));
 
 chrome.storage.sync.get(WIDGET_SYNC_DEFAULTS, (r) => {
   for (const t of widgetToggles) t.checked = r[t.id];
@@ -303,8 +373,3 @@ notionTokenInput.addEventListener(
   "input",
   debounce(() => chrome.storage.local.set({ notionToken: notionTokenInput.value.trim() }, showWidgetSaved), 300)
 );
-
-// Keep the calendar card's login hint in step with the email field above it.
-document.getElementById("googleAccountEmail").addEventListener("input", () => {
-  calLoginHint = document.getElementById("googleAccountEmail").value.trim();
-});

@@ -189,6 +189,10 @@
     .cal-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cal-badge { flex: 0 0 auto; color: var(--sp-sub); font-size: 11px; }
     .cal-empty { padding: 12px 0; color: var(--sp-sub); font-size: 12px; }
+    .cal-account + .cal-account { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--sp-card-border); }
+    .cal-add { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+    .cal-add input { flex: 1 1 auto; min-width: 0; margin: 0; }
+    .cal-client { flex: 0 0 auto; color: var(--sp-sub); font-size: 11px; }
   </style>
 </head>
 <body>
@@ -211,14 +215,16 @@
   <div class="card">
     <h1>Google Calendar</h1>
     <p class="sub">Which calendars the new tab shows</p>
-    <div class="conn-row">
-      <span class="conn-account" id="calAccount">Not connected</span>
-      <span class="conn-actions">
-        <button type="button" class="btn" id="calConnect">Connect</button>
-        <button type="button" class="btn" id="calRefresh">Refresh</button>
-      </span>
+    <div id="calAccounts"></div>
+    <div class="cal-add">
+      <input type="text" id="calClientId" placeholder="OAuth client ID (optional)" autocomplete="off">
+      <button type="button" class="btn" id="calAdd">Add account</button>
     </div>
-    <div class="cal-list" id="calList"></div>
+    <p class="field-note">
+      Leave the client ID empty for a normal Google account. A work or school account whose
+      Google Cloud project is Internal needs its own client ID from that project — it is
+      remembered per account.
+    </p>
     <p class="field-note">
       New calendars you create or subscribe to show up here on their own and follow their
       visibility in Google Calendar until you tick or untick them.
@@ -240,11 +246,6 @@
       <span>Notion tasks</span>
       <input type="checkbox" id="widgetTasks">
     </label>
-    <div class="field">
-      <label for="googleAccountEmail">Google account email</label>
-      <input type="text" id="googleAccountEmail" placeholder="you@gmail.com" autocomplete="off">
-      <p class="field-note">Pre-selects this account on the Google sign-in screen. Leave empty to pick from all accounts each time.</p>
-    </div>
     <div class="field">
       <label for="notionToken">Notion integration token</label>
       <input type="password" id="notionToken" placeholder="ntn_…" autocomplete="off">
