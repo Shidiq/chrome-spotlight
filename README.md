@@ -41,6 +41,21 @@ Calendar and task data are cached, so the page paints immediately and refreshes 
 
 At narrower widths the layout drops to two columns (tab groups spans the bottom), then to one.
 
+### Connecting Google accounts
+
+The options page connects any number of Google accounts, each with its own calendar picks. Signing in uses `chrome.identity.launchWebAuthFlow`, so the account picker looks the same in every Chromium browser, and the account is identified by the verified email address on its token.
+
+A personal account works with the built-in OAuth client. A work or school account usually does not: the built-in client's consent screen admits only its own test users, and a Workspace admin can block unverified apps outright. Give such an account its own client ID instead, from a Google Cloud project it can reach:
+
+1. Enable the **Google Calendar API** on the project.
+2. Create an OAuth client of type **Web application** — a Chrome Extension client will refuse the redirect URI.
+3. Register the redirect URI shown at the top of the Google Calendar card as an authorized redirect URI.
+4. Paste the client ID next to **Add account**.
+
+The client ID is remembered per account and stays editable on the account's row, so a wrong one is fixed in place rather than by removing the account. **Remove** revokes the token at Google as well as deleting the local state, so re-adding shows the consent screen again.
+
+When a connection fails, the message names the cause — `access_denied` (not a test user on that project), `admin_policy_enforced` (your Workspace admin blocks the app), `org_internal` (that client only admits its own organization), or a redirect URI that isn't registered.
+
 ## Tab groups popup
 
 - Click the toolbar icon → popup lists every open tab group (color dot, name, tab count, window number when groups span multiple windows)

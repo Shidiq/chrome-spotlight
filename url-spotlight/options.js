@@ -120,6 +120,21 @@ const calAccountsEl = document.getElementById("calAccounts");
 const calAddBtn = document.getElementById("calAdd");
 const calClientIdInput = document.getElementById("calClientId");
 const calStatus = document.getElementById("calStatus");
+const calError = document.getElementById("calError");
+const calRedirectUri = document.getElementById("calRedirectUri");
+const calCopyUri = document.getElementById("calCopyUri");
+
+// Registering this on the OAuth client is the step people miss, so show it
+// rather than making them derive it from the extension id.
+calRedirectUri.value = SpGCal.getRedirectUrl();
+calCopyUri.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(calRedirectUri.value);
+    showCalSaved("Copied");
+  } catch {
+    calRedirectUri.select(); // clipboard blocked — at least tee it up for ⌘C
+  }
+});
 
 let calStatusTimer = null;
 function showCalSaved(text) {
@@ -129,7 +144,26 @@ function showCalSaved(text) {
   calStatusTimer = setTimeout(() => calStatus.classList.remove("show"), 1500);
 }
 
-// One entry per connected account: { id, items, overrides, connected, checked, busy }.
+function clearCalError() {
+  calError.textContent = "";
+}
+
+// Auth failures name a cause and a fix, so they stay on screen until the next
+// attempt instead of flashing past like the "Saved" status. gcal.js supplies
+// the message for anything that came back from Google.
+function showCalError(e, fallback) {
+  calError.textContent = calErrorText(e) || fallback;
+}
+
+function calErrorText(e) {
+  if (!e) return "";
+  if (e.reason === "no-email") return "Google didn't return an email address for that account, so it can't be identified.";
+  if (e.reason === "userinfo") return "Google wouldn't identify that account. Check the client ID's consent screen allows the email scope.";
+  if (e.status === 401) return "That account's access expired. Reconnect it.";
+  return e.message || "";
+}
+
+// One entry per connected account: { id, name, clientId, items, overrides, connected, checked, busy }.
 // Nothing is shared between accounts — each has its own list and its own picks.
 let accounts = [];
 
@@ -174,8 +208,14 @@ function calListFor(acct) {
 
     check.addEventListener("change", async () => {
       acct.overrides[cal.id] = check.checked;
-      await SpGCal.setOverride(acct.id, cal.id, check.checked);
-      showCalSaved();
+      try {
+        await SpGCal.setOverride(acct.id, cal.id, check.checked);
+        showCalSaved();
+      } catch (e) {
+        // Chrome sync can refuse the write once the override map outgrows its
+        // per-item quota; saying nothing would lose the tick without a trace.
+        showCalError(e, "Couldn't save that choice.");
+      }
     });
 
     listEl.appendChild(row);
@@ -192,27 +232,22 @@ function accountBlock(acct) {
 
   const name = document.createElement("span");
   name.className = "conn-account";
-  name.textContent = acct.id;
+  name.textContent = acct.name ? `${acct.name} · ${acct.id}` : acct.id;
   if (!acct.checked) name.textContent += " · checking…";
   else if (!acct.connected) name.textContent += " · reconnect needed";
 
   const actions = document.createElement("span");
   actions.className = "conn-actions";
 
-  if (acct.clientId) {
-    const badge = document.createElement("span");
-    badge.className = "cal-client";
-    badge.textContent = "own client ID";
-    badge.title = acct.clientId;
-    actions.appendChild(badge);
-  }
-
   const reload = document.createElement("button");
   reload.type = "button";
   reload.className = "btn";
   reload.textContent = acct.connected ? "Refresh" : "Reconnect";
   reload.disabled = acct.busy;
-  reload.addEventListener("click", () => loadAccount(acct, !acct.connected));
+  reload.addEventListener("click", () => {
+    clearCalError();
+    loadAccount(acct, !acct.connected);
+  });
 
   const remove = document.createElement("button");
   remove.type = "button";
@@ -220,7 +255,8 @@ function accountBlock(acct) {
   remove.textContent = "Remove";
   remove.disabled = acct.busy;
   remove.addEventListener("click", async () => {
-    if (!confirm(`Remove ${acct.id}? Its calendar choices are discarded.`)) return;
+    if (!confirm(`Remove ${acct.id}? Its calendar choices are discarded and its access is revoked at Google.`)) return;
+    clearCalError();
     await SpGCal.removeAccount(acct.id);
     accounts = accounts.filter((a) => a.id !== acct.id);
     renderAccounts();
@@ -229,7 +265,43 @@ function accountBlock(acct) {
 
   actions.append(reload, remove);
   row.append(name, actions);
-  wrap.append(row, calListFor(acct));
+  wrap.append(row, clientIdRow(acct), calListFor(acct));
+  return wrap;
+}
+
+// Editable, because a wrong client id is the likeliest reason an account won't
+// connect and used to be fixable only by removing and re-adding the account.
+function clientIdRow(acct) {
+  const wrap = document.createElement("div");
+  wrap.className = "cal-clientid";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.autocomplete = "off";
+  input.placeholder = "Default client ID";
+  input.value = acct.clientId || "";
+  input.disabled = acct.busy;
+
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "btn";
+  save.textContent = "Save & reconnect";
+  save.disabled = acct.busy;
+  save.addEventListener("click", async () => {
+    clearCalError();
+    const clientId = input.value.trim();
+    acct.clientId = clientId;
+    try {
+      await SpGCal.setAccountClientId(acct.id, clientId);
+    } catch (e) {
+      showCalError(e, "Couldn't save that client ID.");
+      return;
+    }
+    // The old token was cleared with it, so this has to be interactive.
+    await loadAccount(acct, true);
+  });
+
+  wrap.append(input, save);
   return wrap;
 }
 
@@ -245,14 +317,17 @@ function renderAccounts() {
   for (const acct of accounts) calAccountsEl.appendChild(accountBlock(acct));
 }
 
-async function loadAccount(acct, interactive) {
+// `quiet` is for the revalidation pass on load: a lapsed session there is
+// routine, and the "reconnect needed" label on the row already says so. Every
+// other call is a button the user pressed, which owes them an answer.
+async function loadAccount(acct, interactive, quiet) {
   acct.busy = true;
   renderAccounts();
   try {
     const token = await SpGCal.getGoogleToken(acct.id, interactive);
     acct.connected = !!token;
     if (!token) {
-      if (interactive) showCalSaved("Couldn't connect");
+      if (!quiet) showCalError(null, "Couldn't connect to Google.");
       return;
     }
     acct.items = await SpGCal.fetchCalendarList(acct.id, token);
@@ -262,7 +337,7 @@ async function loadAccount(acct, interactive) {
       await SpGCal.clearToken(acct.id);
       acct.connected = false;
     }
-    showCalSaved("Couldn't load calendars");
+    if (!quiet) showCalError(e, "Couldn't load calendars.");
   } finally {
     acct.busy = false;
     acct.checked = true;
@@ -272,19 +347,17 @@ async function loadAccount(acct, interactive) {
 
 calAddBtn.addEventListener("click", async () => {
   calAddBtn.disabled = true;
+  clearCalError();
   const clientId = calClientIdInput.value.trim();
   try {
     const added = await SpGCal.addAccount(clientId);
-    if (!added) {
-      showCalSaved("Couldn't connect");
-      return;
-    }
     let acct = accounts.find((a) => a.id === added.id);
     if (!acct) {
       acct = { id: added.id, items: [], overrides: {}, connected: false, checked: false, busy: false };
       accounts.push(acct);
     }
     acct.clientId = clientId;
+    acct.name = added.name;
     acct.items = added.items;
     calClientIdInput.value = "";
     acct.overrides = await SpGCal.loadOverrides(added.id);
@@ -293,7 +366,7 @@ calAddBtn.addEventListener("click", async () => {
     renderAccounts();
     showCalSaved(added.alreadyAdded ? "Already connected" : "Added");
   } catch (e) {
-    showCalSaved(e && e.reason === "no-primary" ? "Couldn't identify that account" : "Couldn't connect");
+    showCalError(e, "Couldn't connect to Google.");
   } finally {
     calAddBtn.disabled = false;
   }
@@ -305,6 +378,7 @@ calAddBtn.addEventListener("click", async () => {
   accounts = await Promise.all(
     stored.map(async (a) => ({
       id: a.id,
+      name: a.name || "",
       clientId: a.clientId || "",
       items: await SpGCal.loadCachedList(a.id),
       overrides: await SpGCal.loadOverrides(a.id),
@@ -314,7 +388,7 @@ calAddBtn.addEventListener("click", async () => {
     }))
   );
   renderAccounts();
-  await Promise.all(accounts.map((a) => loadAccount(a, false)));
+  await Promise.all(accounts.map((a) => loadAccount(a, false, true)));
 })();
 
 // --- New Tab Widgets ---

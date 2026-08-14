@@ -15,6 +15,7 @@
       --sp-label: #c4c9d2;
       --sp-accent: #5b8cff;
       --sp-success: #6bd08a;
+      --sp-danger: #f28b82;
     }
     @media (prefers-color-scheme: light) {
       :root {
@@ -26,6 +27,7 @@
         --sp-sub: #6b7280;
         --sp-label: #3a4150;
         --sp-success: #1e9e54;
+        --sp-danger: #c5221f;
       }
     }
     * { box-sizing: border-box; }
@@ -192,7 +194,30 @@
     .cal-account + .cal-account { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--sp-card-border); }
     .cal-add { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
     .cal-add input { flex: 1 1 auto; min-width: 0; margin: 0; }
-    .cal-client { flex: 0 0 auto; color: var(--sp-sub); font-size: 11px; }
+    .cal-setup { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--sp-card-border); }
+    .cal-uri { display: flex; align-items: center; gap: 8px; }
+    .cal-uri input { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 11px; color: var(--sp-sub); }
+    .cal-steps { margin-top: 12px; color: var(--sp-sub); font-size: 11px; }
+    .cal-steps summary { cursor: pointer; }
+    .cal-steps ol { margin: 8px 0 0; padding-left: 18px; }
+    .cal-steps li { margin: 5px 0; line-height: 1.5; }
+    .cal-steps code { word-break: break-all; }
+    /* The client id sits on its own line under the address: the ids are long,
+       and sharing a row would squeeze the button off the card. */
+    .cal-clientid { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .cal-clientid input { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 11px; }
+    /* Unlike the transient "Saved" status, an auth error is a paragraph the
+       user has to read and act on, so it stays until the next attempt. */
+    .cal-error {
+      margin-top: 16px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--sp-danger);
+      color: var(--sp-label);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .cal-error:empty { display: none; }
   </style>
 </head>
 <body>
@@ -215,20 +240,38 @@
   <div class="card">
     <h1>Google Calendar</h1>
     <p class="sub">Which calendars the new tab shows</p>
+    <div class="cal-setup">
+      <label for="calRedirectUri">This extension's redirect URI</label>
+      <div class="cal-uri">
+        <input type="text" id="calRedirectUri" readonly autocomplete="off">
+        <button type="button" class="btn" id="calCopyUri">Copy</button>
+      </div>
+      <details class="cal-steps">
+        <summary>Connecting a work or school account</summary>
+        <ol>
+          <li>Open <code>console.cloud.google.com</code> signed in as that account and create a project, or pick one you can use.</li>
+          <li>Enable the <strong>Google Calendar API</strong> for it.</li>
+          <li>Create an OAuth client of type <strong>Web application</strong> — a Chrome Extension client will refuse the redirect URI.</li>
+          <li>Add the redirect URI above under <em>Authorized redirect URIs</em>.</li>
+          <li>Copy the client ID into the box next to <em>Add account</em> below, then add the account.</li>
+        </ol>
+      </details>
+    </div>
     <div id="calAccounts"></div>
     <div class="cal-add">
-      <input type="text" id="calClientId" placeholder="OAuth client ID (optional)" autocomplete="off">
+      <input type="text" id="calClientId" placeholder="OAuth client ID for this account (optional)" autocomplete="off">
       <button type="button" class="btn" id="calAdd">Add account</button>
     </div>
     <p class="field-note">
-      Leave the client ID empty for a normal Google account. A work or school account whose
-      Google Cloud project is Internal needs its own client ID from that project — it is
-      remembered per account.
+      Leave the client ID empty for a normal Google account. A work or school account is usually
+      refused by the built-in client, and needs its own from a project it can reach — it is
+      remembered per account and can be changed later without removing the account.
     </p>
     <p class="field-note">
       New calendars you create or subscribe to show up here on their own and follow their
       visibility in Google Calendar until you tick or untick them.
     </p>
+    <div class="cal-error" id="calError"></div>
     <div class="status" id="calStatus">Saved</div>
   </div>
   <div class="card">
