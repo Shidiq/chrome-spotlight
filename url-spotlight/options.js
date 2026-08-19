@@ -7,12 +7,18 @@ const SEARCH_ENGINES = {
 };
 const DEFAULT_ENGINE = "duckduckgo";
 const DEFAULT_TASKVIEW_SHORTCUT = { alt: true, ctrl: false, shift: false, meta: false, key: "Tab" };
+// "Hyper" is always all four modifiers, so only the physical key is stored.
+const DEFAULT_HYPER_SHORTCUT = { enabled: false, code: "KeyY" };
+const HYPER_SYMBOLS = "⌃⌥⇧⌘";
 
 const select = document.getElementById("engine");
 const loadingAnim = document.getElementById("loadingAnim");
 const status = document.getElementById("status");
 const taskViewShortcutBtn = document.getElementById("taskViewShortcutBtn");
 const taskViewShortcutReset = document.getElementById("taskViewShortcutReset");
+const hyperEnabled = document.getElementById("hyperEnabled");
+const hyperKeyBtn = document.getElementById("hyperKeyBtn");
+const hyperDesc = document.getElementById("hyperDesc");
 
 let statusTimer = null;
 function showSaved() {
@@ -29,14 +35,22 @@ for (const [key, { name }] of Object.entries(SEARCH_ENGINES)) {
 }
 
 let activeShortcut = DEFAULT_TASKVIEW_SHORTCUT;
+let hyperShortcut = DEFAULT_HYPER_SHORTCUT;
 
 chrome.storage.sync.get(
-  { searchEngine: DEFAULT_ENGINE, loadingAnimation: true, taskViewShortcut: DEFAULT_TASKVIEW_SHORTCUT },
+  {
+    searchEngine: DEFAULT_ENGINE,
+    loadingAnimation: true,
+    taskViewShortcut: DEFAULT_TASKVIEW_SHORTCUT,
+    hyperShortcut: DEFAULT_HYPER_SHORTCUT,
+  },
   (r) => {
     select.value = SEARCH_ENGINES[r.searchEngine] ? r.searchEngine : DEFAULT_ENGINE;
     loadingAnim.checked = r.loadingAnimation;
     activeShortcut = r.taskViewShortcut;
     renderShortcutLabel(activeShortcut);
+    hyperShortcut = r.hyperShortcut;
+    renderHyper();
   }
 );
 
@@ -112,6 +126,70 @@ taskViewShortcutReset.addEventListener("click", () => {
   activeShortcut = DEFAULT_TASKVIEW_SHORTCUT;
   renderShortcutLabel(activeShortcut);
   chrome.storage.sync.set({ taskViewShortcut: activeShortcut }, showSaved);
+});
+
+// --- Hyper key ---
+// Chrome extensions can't remap Caps Lock (OS-level), and chrome.commands can't
+// express a four-modifier combo — so this is matched in content.js instead, and
+// the user maps Caps Lock to Hyper themselves.
+
+function codeLabel(code) {
+  if (!code) return "?";
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  return KEY_LABELS[code] || code;
+}
+
+function renderHyper() {
+  const key = codeLabel(hyperShortcut.code);
+  hyperEnabled.checked = !!hyperShortcut.enabled;
+  hyperKeyBtn.textContent = key;
+  hyperKeyBtn.disabled = !hyperShortcut.enabled;
+  hyperDesc.textContent =
+    `Press ${HYPER_SYMBOLS} + ${key} to open Spotlight. Chrome can't remap Caps ` +
+    "Lock (⇪) — map it to Hyper in Karabiner-Elements or Raycast. " +
+    "Not active on chrome:// pages.";
+}
+
+function saveHyper() {
+  chrome.storage.sync.set({ hyperShortcut }, showSaved);
+}
+
+function recordHyperKey(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.key === "Escape") {
+    stopRecordingHyper();
+    return;
+  }
+  if (["Alt", "Control", "Shift", "Meta"].includes(e.key)) return; // wait for a real key
+  // No modifier check — Hyper supplies them. Only the physical key matters.
+  hyperShortcut = { ...hyperShortcut, code: e.code };
+  stopRecordingHyper();
+  saveHyper();
+}
+
+function stopRecordingHyper() {
+  window.removeEventListener("keydown", recordHyperKey, true);
+  hyperKeyBtn.classList.remove("recording");
+  renderHyper();
+}
+
+hyperKeyBtn.addEventListener("click", () => {
+  if (hyperKeyBtn.disabled) return;
+  hyperKeyBtn.classList.add("recording");
+  hyperKeyBtn.textContent = "…";
+  // Capture on window so this beats content.js's document-level hyper listener
+  // (content.js is loaded into this page too); stopPropagation then keeps the
+  // spotlight overlay from opening on top of the options page while recording.
+  window.addEventListener("keydown", recordHyperKey, true);
+});
+
+hyperEnabled.addEventListener("change", () => {
+  hyperShortcut = { ...hyperShortcut, enabled: hyperEnabled.checked };
+  if (!hyperShortcut.enabled) stopRecordingHyper();
+  else renderHyper();
+  saveHyper();
 });
 
 // --- Google Calendar picker ---

@@ -14,6 +14,8 @@
   };
   const DEFAULT_ENGINE = "duckduckgo";
   const DEFAULT_TASKVIEW_SHORTCUT = { alt: true, ctrl: false, shift: false, meta: false, key: "Tab" };
+  // "Hyper" is always all four modifiers, so only the physical key is stored.
+  const DEFAULT_HYPER_SHORTCUT = { enabled: false, code: "KeyY" };
 
   let hostEl = null;
   let inputEl = null;
@@ -29,17 +31,20 @@
   let tabMatches = [];
   let bhMatches = [];
   let taskViewShortcut = DEFAULT_TASKVIEW_SHORTCUT;
+  let hyperShortcut = DEFAULT_HYPER_SHORTCUT;
 
   chrome.storage.sync.get(
     {
       searchEngine: DEFAULT_ENGINE,
       loadingAnimation: true,
       taskViewShortcut: DEFAULT_TASKVIEW_SHORTCUT,
+      hyperShortcut: DEFAULT_HYPER_SHORTCUT,
     },
     (r) => {
       searchEngine = r.searchEngine;
       loadingAnimation = r.loadingAnimation;
       taskViewShortcut = r.taskViewShortcut;
+      hyperShortcut = r.hyperShortcut;
     }
   );
   chrome.storage.onChanged.addListener((c, area) => {
@@ -47,6 +52,7 @@
     if (c.searchEngine) searchEngine = c.searchEngine.newValue;
     if (c.loadingAnimation) loadingAnimation = c.loadingAnimation.newValue;
     if (c.taskViewShortcut) taskViewShortcut = c.taskViewShortcut.newValue;
+    if (c.hyperShortcut) hyperShortcut = c.hyperShortcut.newValue;
   });
 
   function resolveQuery(raw) {
@@ -706,6 +712,14 @@
     return true;
   }
 
+  function matchesHyperShortcut(e) {
+    const cfg = hyperShortcut;
+    if (!cfg || !cfg.enabled || !cfg.code) return false;
+    // Hyper is all four modifiers. Match e.code, not e.key: on macOS Option
+    // rewrites e.key (⌥Y arrives as "¥") and the value varies by layout.
+    return e.altKey && e.ctrlKey && e.shiftKey && e.metaKey && e.code === cfg.code;
+  }
+
   function isTaskViewModifierKey(key) {
     const cfg = taskViewShortcut;
     return (
@@ -903,6 +917,15 @@
   document.addEventListener(
     "keydown",
     (e) => {
+      // Checked before the hostEl guard so hyper toggles the overlay shut too,
+      // and before the Task View branch so a hyper press never falls through.
+      if (matchesHyperShortcut(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (hostEl) close();
+        else open();
+        return;
+      }
       if (hostEl) return; // spotlight/tab-search overlay already open, don't conflict
       if (taskViewActive || taskViewPending) {
         if (e.key === "Escape") {

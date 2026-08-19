@@ -117,6 +117,22 @@
       font-size: 12px;
       cursor: pointer;
     }
+    .setting-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .setting-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .setting-title { color: var(--sp-text); font-size: 13px; }
+    .setting-desc { color: var(--sp-sub); font-size: 11px; line-height: 1.45; }
+    .setting-control { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+    .setting-control input[type="checkbox"] {
+      width: 16px; height: 16px; accent-color: var(--sp-accent); cursor: pointer;
+    }
+    .shortcut-key { flex: 0 0 auto; min-width: 52px; }
+    .shortcut-key[disabled] { opacity: 0.4; cursor: default; }
     input[type="text"], input[type="password"] {
       width: 100%;
       padding: 10px 12px;
@@ -234,6 +250,16 @@
     <div class="shortcut-row">
       <button type="button" class="shortcut-btn" id="taskViewShortcutBtn">⌥ Tab</button>
       <button type="button" class="shortcut-reset" id="taskViewShortcutReset">Reset</button>
+    </div>
+    <div class="setting-row">
+      <div class="setting-main">
+        <span class="setting-title">Hyper Key</span>
+        <span class="setting-desc" id="hyperDesc"></span>
+      </div>
+      <div class="setting-control">
+        <button type="button" class="shortcut-btn shortcut-key" id="hyperKeyBtn">Y</button>
+        <input type="checkbox" id="hyperEnabled">
+      </div>
     </div>
     <div class="status" id="status">Saved</div>
   </div>

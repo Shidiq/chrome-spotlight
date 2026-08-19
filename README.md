@@ -12,6 +12,7 @@ Chrome/Helium extension. One macOS-style Spotlight overlay for URL navigation, s
 ## Use
 
 - Press shortcut on any page (or `Cmd+Shift+O` / `Ctrl+Shift+O`, same overlay) → appears centered, listing open tabs first
+- **Hyper key** (opt-in, options page): binds `⌃⌥⇧⌘`+`Y` (rebindable) to the same overlay. Chrome can't remap Caps Lock and `chrome.commands` can't hold four modifiers, so map Caps Lock → Hyper yourself in Karabiner-Elements or Raycast; this binding won't fire on `chrome://` pages, where the browser shortcut above still works
 - Type URL, domain, or search query — open tabs, bookmarks, and history are fuzzy-matched live
 - `↑` / `↓` pick a result
 - **`1`-`9`** jump straight to the numbered result (badges shown on each row) — no need to arrow down first
