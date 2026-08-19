@@ -91,6 +91,7 @@ function recordShortcut(e) {
     stopRecording();
     return;
   }
+  if (typeof e.key !== "string") return; // synthetic event with no key
   if (["Alt", "Control", "Shift", "Meta"].includes(e.key)) return; // wait for a non-modifier key
   if (!e.altKey && !e.ctrlKey && !e.metaKey) {
     taskViewShortcutBtn.textContent = "Need a modifier key…";
@@ -148,7 +149,7 @@ function renderHyper() {
   hyperDesc.textContent =
     `Press ${HYPER_SYMBOLS} + ${key} to open Spotlight. Chrome can't remap Caps ` +
     "Lock (⇪) — map it to Hyper in Karabiner-Elements or Raycast. " +
-    "Not active on chrome:// pages.";
+    "Not active on chrome:// pages — see the README for full coverage.";
 }
 
 function saveHyper() {

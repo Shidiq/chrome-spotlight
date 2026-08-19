@@ -1,0 +1,34 @@
+{
+  "title": "URL Spotlight",
+  "rules": [
+    {
+      "description": "Hyper (⌃⌥⇧⌘) + Y → ⌘⇧O — opens URL Spotlight, including on chrome:// pages",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": {
+            "key_code": "y",
+            "modifiers": {
+              "mandatory": ["control", "option", "shift", "command"]
+            }
+          },
+          "to": [
+            { "key_code": "o", "modifiers": ["left_command", "left_shift"] }
+          ],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": [
+                "^com\\.google\\.Chrome$",
+                "^com\\.google\\.Chrome\\.beta$",
+                "^com\\.google\\.Chrome\\.dev$",
+                "^com\\.google\\.Chrome\\.canary$",
+                "^net\\.imput\\.helium$"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

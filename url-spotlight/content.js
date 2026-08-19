@@ -700,11 +700,19 @@
   let taskViewHostEl = null;
   let taskViewCardsEl = null;
 
+  // Synthetic keydown events dispatched by some apps (JupyterLab/CodeMirror,
+  // Lumino) carry no `key` property, so this can't assume a string.
+  function normalizeKey(e) {
+    const k = e.key;
+    if (typeof k !== "string" || !k) return "";
+    return k.length === 1 ? k.toLowerCase() : k;
+  }
+
   function matchesTaskViewShortcut(e) {
     const cfg = taskViewShortcut;
     if (!cfg || !cfg.key) return false;
-    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    if (key !== cfg.key) return false;
+    const key = normalizeKey(e);
+    if (!key || key !== cfg.key) return false;
     if (e.altKey !== !!cfg.alt) return false;
     if (e.ctrlKey !== !!cfg.ctrl) return false;
     if (e.shiftKey !== !!cfg.shift) return false;

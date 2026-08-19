@@ -12,7 +12,7 @@ Chrome/Helium extension. One macOS-style Spotlight overlay for URL navigation, s
 ## Use
 
 - Press shortcut on any page (or `Cmd+Shift+O` / `Ctrl+Shift+O`, same overlay) → appears centered, listing open tabs first
-- **Hyper key** (opt-in, options page): binds `⌃⌥⇧⌘`+`Y` (rebindable) to the same overlay. Chrome can't remap Caps Lock and `chrome.commands` can't hold four modifiers, so map Caps Lock → Hyper yourself in Karabiner-Elements or Raycast; this binding won't fire on `chrome://` pages, where the browser shortcut above still works
+- **Hyper key** (opt-in) binds `⌃⌥⇧⌘`+`Y` to the same overlay — see [Hyper key](#hyper-key) below
 - Type URL, domain, or search query — open tabs, bookmarks, and history are fuzzy-matched live
 - `↑` / `↓` pick a result
 - **`1`-`9`** jump straight to the numbered result (badges shown on each row) — no need to arrow down first
@@ -28,6 +28,57 @@ Chrome/Helium extension. One macOS-style Spotlight overlay for URL navigation, s
 
 - On pages content scripts can't reach (`chrome://`, Web Store, etc.) the shortcut opens the same overlay in a small popup window instead — same keys, same behavior
 - The new-tab page shows the overlay directly, over the widgets below
+
+## Hyper key
+
+Opens the overlay with `⌃⌥⇧⌘`+`Y`, so a Caps Lock remapped to Hyper becomes a
+one-key launcher. There are two ways to set this up, and you want **one or the
+other, not both**.
+
+macOS has no built-in Caps Lock → Hyper mapping (System Settings only offers a
+single modifier), and an extension can't create one — that's OS-privileged. So
+either route needs Raycast or Karabiner to supply the Hyper key itself.
+
+### Option A — Karabiner rule (works everywhere, including `chrome://`)
+
+`karabiner/url-spotlight-hyper.json` rewrites `⌃⌥⇧⌘`+`Y` into `⌘⇧O`, the
+extension's normal browser shortcut. Chrome then fires it on *every* page, and
+restricted pages fall back to the popup window described above.
+
+Requires [Karabiner-Elements](https://karabiner-elements.pqrs.org). Install by
+copying the file into `~/.config/karabiner/assets/complex_modifications/`, then
+enabling the rule under Karabiner → Complex Modifications → Add rule. Or import
+it directly:
+
+```
+karabiner://karabiner/assets/complex_modifications/import?url=https://raw.githubusercontent.com/Shidiq/chrome-spotlight/main/karabiner/url-spotlight-hyper.json
+```
+
+Leave the extension's own **Hyper Key** toggle **off** in this mode — Karabiner
+consumes the keystroke, so the in-extension matcher never sees it.
+
+Three things to adjust if your setup differs:
+
+- The rule sends `⌘⇧O`. If you rebound the shortcut at
+  `chrome://extensions/shortcuts`, change the rule's `to` block to match.
+- It's scoped to Chrome and Helium via `frontmost_application_if`, so `⌃⌥⇧⌘`+`Y`
+  keeps working for other apps. Delete the `conditions` block to make it global,
+  or add your browser's bundle ID (find it in Karabiner-EventViewer →
+  Frontmost Application).
+- If you map Caps Lock → Hyper *in Karabiner* rather than Raycast, that rule
+  must sit **above** this one — Karabiner applies rules in list order.
+
+### Option B — extension toggle (no extra software beyond a Hyper key)
+
+Turn on **Hyper Key** in the options page and pick the key. `content.js` matches
+the combo directly.
+
+Simpler, but it only covers pages content scripts can run on: `http(s)://`,
+`file://` (needs "Allow access to file URLs" at `chrome://extensions`), and the
+new tab page. It does **not** fire on `chrome://` pages, the Web Store, or the
+built-in PDF viewer — content scripts are barred there by the browser, and
+`chrome.commands` rejects a four-modifier shortcut (it requires Ctrl or Alt and
+forbids the two together). On those pages, use `⌘⇧O`, or Option A.
 
 ## New tab widgets
 

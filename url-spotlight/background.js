@@ -94,6 +94,14 @@ function isRestrictedUrl(url) {
   );
 }
 
+// The fallback popup is an extension page with no content script and no
+// message listener, so isRestrictedUrl() deliberately doesn't cover it (own
+// pages take the content-script path, which is what the new tab page needs).
+// Match it precisely instead.
+function isFallbackPopup(url) {
+  return !!url && url.startsWith(chrome.runtime.getURL("popup.html"));
+}
+
 function sendToggle(tabId, msgType, command, isRetry) {
   chrome.tabs.sendMessage(tabId, { type: msgType }, (res) => {
     const err = chrome.runtime.lastError;
@@ -163,6 +171,13 @@ chrome.commands.onCommand.addListener((command, tab) => {
 
   const processTab = (t) => {
     if (!t || !t.id) return;
+    // Pressing the shortcut again while the fallback popup is focused would
+    // find no listener there and open a *second* popup window. Toggle it shut
+    // instead, matching how the inline overlay behaves.
+    if (isFallbackPopup(t.url)) {
+      chrome.windows.remove(t.windowId);
+      return;
+    }
     if (isRestrictedUrl(t.url)) {
       openPopupFallback(command, t.id);
     } else {
