@@ -76,6 +76,11 @@
       cursor: pointer;
     }
     .toggle-row input { width: 16px; height: 16px; accent-color: var(--sp-accent); cursor: pointer; }
+    .preview-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
     .status {
       margin-top: 14px;
       height: 16px;
@@ -246,6 +251,9 @@
       <span>Page loading animation</span>
       <input type="checkbox" id="loadingAnim">
     </label>
+    <div class="preview-row">
+      <button type="button" class="shortcut-reset" id="loadingPreview">Preview animation</button>
+    </div>
     <label>Task View tab switcher</label>
     <div class="shortcut-row">
       <button type="button" class="shortcut-btn" id="taskViewShortcutBtn">⌥ Tab</button>
@@ -335,6 +343,7 @@
     <div class="status" id="widgetStatus">Saved</div>
   </div>
   <script src="gcal.js"></script>
+  <script src="loader.js"></script>
   <script src="options.js"></script>
   <script src="content.js"></script>
 </body>

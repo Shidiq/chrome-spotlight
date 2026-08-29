@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "URL Spotlight",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "description": "Spotlight-style overlay to search open tabs, bookmarks, and history — or open any URL — from any page.",
   "permissions": ["activeTab", "tabs", "tabGroups", "bookmarks", "history", "storage", "scripting", "favicon", "identity"],
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxr5HhT5BS6RnV3dSQtSoGNzLdv8UDZUs4QJBS8eSwyQigbAmE7NAnnYxGFjVV1oG19IPdYJwHTpFHZcHxWMPpY1qugQKs/ujk1bR9NjGSC4Pss0UYY+q4eYV/rPWf1pDFOhDtbGGw0YRtQmZvPNGiE/7Hmamimz/I5Ukc7P+tGutjhzVSoNHOZb5Q9G0uuK4llMMAJ5JZGOIur4xrMbkAVPmB0PojcVHfKE+6Mg22qpcsPzgjYGzvi+Vy/eDIWzPNmtq/sUprCE52EyrMcpRqTYNTjRjTkec0w2ljwKBZkCNh/3lDpaUP8+CPA3aB2hsF+Et0WndLpXxroROm/ZeMQIDAQAB",

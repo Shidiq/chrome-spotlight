@@ -13,6 +13,7 @@ const HYPER_SYMBOLS = "⌃⌥⇧⌘";
 
 const select = document.getElementById("engine");
 const loadingAnim = document.getElementById("loadingAnim");
+const loadingPreview = document.getElementById("loadingPreview");
 const status = document.getElementById("status");
 const taskViewShortcutBtn = document.getElementById("taskViewShortcutBtn");
 const taskViewShortcutReset = document.getElementById("taskViewShortcutReset");
@@ -60,6 +61,20 @@ select.addEventListener("change", () => {
 
 loadingAnim.addEventListener("change", () => {
   chrome.storage.sync.set({ loadingAnimation: loadingAnim.checked }, showSaved);
+});
+
+// Renders the overlay right here on the options page. Separates "the overlay
+// can't render" from "the trigger never fired" when the animation seems dead.
+let previewTimer = null;
+loadingPreview.addEventListener("click", () => {
+  const L = window.__spotlightLoader;
+  if (!L) return;
+  if (previewTimer) clearTimeout(previewTimer);
+  L.show();
+  previewTimer = setTimeout(() => {
+    previewTimer = null;
+    L.hide();
+  }, 2000);
 });
 
 // --- Task View shortcut recorder ---

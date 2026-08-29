@@ -120,7 +120,7 @@ function sendToggle(tabId, msgType, command, isRetry) {
     // No content script in this tab (tab loaded before install, file://,
     // page still loading…) — inject on demand, then retry once.
     chrome.scripting.executeScript(
-      { target: { tabId }, files: ["loader.js", "content.js"] },
+      { target: { tabId }, files: ["loader.js", "loading.js", "content.js"] },
       () => {
         if (chrome.runtime.lastError) {
           // Page Chrome refuses to inject into (chrome://, Web Store…)
