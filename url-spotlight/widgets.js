@@ -10,7 +10,6 @@
     widgetClock: true,
     widgetCalendar: true,
     widgetTasks: true,
-    widgetTabGroups: true,
     notionDatabaseId: "77c516e8-c36c-4226-9d1f-0d682c5e97f5",
     notionDataSourceId: "7ae3b9f2-031c-4587-98a1-8feae61eba98",
   };
@@ -19,7 +18,6 @@
   const GCAL_SYNC_KEYS = ["googleAccounts", "calendarOverrides"];
   const CACHE_KEY = "widgetsCache";
   const TOKEN_KEY = "notionToken";
-  const CLOSED_GROUPS_KEY = "closedGroups";
   const REFRESH_MS = 5 * 60 * 1000;
 
   function loadConfig() {
@@ -396,60 +394,19 @@
     body.appendChild(btn);
   }
 
-  // ---------------------------------------------------------- tab groups
-
-  const tabGroups = self.SpTabGroups;
-
-  function groupRow(item, onChanged) {
-    const row = el("button", "sp-row sp-group" + (item.kind === "closed" ? " closed" : ""));
-    const dot = el("span", "sp-event-dot");
-    dot.style.background = tabGroups.dotColor(item.color);
-    const title = el("span", "sp-group-title" + (item.title ? "" : " untitled"), item.title || "Untitled group");
-    const count = el("span", "sp-chip", item.tabCount === 1 ? "1 tab" : `${item.tabCount} tabs`);
-    row.append(dot, title, count);
-    row.title = item.kind === "closed" ? "Restore group" : "Go to group";
-    // Focusing a group moves the browser away from this tab, so nothing to do
-    // on success; onChanged only fires when the group turned out to be gone.
-    row.addEventListener("click", () => tabGroups.activate(item, () => {}, onChanged));
-    return row;
-  }
-
-  function renderGroups(cardRef, items, onChanged) {
-    const body = cardRef.body;
-    body.textContent = "";
-    if (!items.length) {
-      body.appendChild(el("div", "sp-empty", "No tab groups"));
-      body.appendChild(el("div", "sp-hint", "Right-click a tab → Add tab to new group"));
-      return;
-    }
-    const hasClosed = items.some((it) => it.kind === "closed");
-    let closedLabelDone = false;
-    items.forEach((it, i) => {
-      if (hasClosed && i === 0 && it.kind === "open") {
-        body.appendChild(el("div", "sp-day-header", "Open groups"));
-      }
-      if (it.kind === "closed" && !closedLabelDone) {
-        closedLabelDone = true;
-        body.appendChild(el("div", "sp-day-header", "Recently closed"));
-      }
-      body.appendChild(groupRow(it, onChanged));
-    });
-  }
-
   // -------------------------------------------------------------- scheduler
 
   let cfg = null;
   let root = null;
   let agendaCard = null;
   let tasksCard = null;
-  let groupsCard = null;
   let nextEvent = null;
   let lastFetch = { calendar: 0, tasks: 0 };
 
   function renderShell() {
     root.textContent = "";
     tickers.length = 0;
-    agendaCard = tasksCard = groupsCard = null;
+    agendaCard = tasksCard = null;
     nextEvent = null;
 
     const head = el("div", "sp-head");
@@ -475,11 +432,6 @@
       tasksCard = card("Tasks", true);
       tasksCard.body.appendChild(el("div", "sp-empty", "Loading…"));
       cols.push(["sp-col-tasks", tasksCard.root]);
-    }
-    if (cfg.widgetTabGroups) {
-      groupsCard = card("Tab groups", true);
-      groupsCard.body.appendChild(el("div", "sp-empty", "Loading…"));
-      cols.push(["sp-col-side", groupsCard.root]);
     }
     for (const [cls, node] of cols) {
       const col = el("div", "sp-col " + cls);
@@ -618,22 +570,9 @@
     }
   }
 
-  async function refreshGroups() {
-    if (!groupsCard) return;
-    if (!tabGroups.supported()) {
-      groupsCard.body.textContent = "";
-      groupsCard.body.appendChild(el("div", "sp-hint", "Tab groups aren't supported in this browser."));
-      return;
-    }
-    const items = await tabGroups.load();
-    if (!groupsCard) return;
-    renderGroups(groupsCard, items, refreshGroups);
-  }
-
   function refreshAll() {
     refreshCalendar();
     refreshTasks();
-    refreshGroups();
   }
 
   async function init() {
@@ -652,9 +591,6 @@
 
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState !== "visible") return;
-      // Groups are local and cheap, and change while this tab sits in the
-      // background — re-read them every time rather than on the 5-min cycle.
-      refreshGroups();
       const stale = Math.min(lastFetch.calendar, lastFetch.tasks) < Date.now() - REFRESH_MS;
       if (stale) {
         refreshCalendar();
@@ -664,8 +600,6 @@
 
     chrome.storage.onChanged.addListener(async (changes, area) => {
       const keys = Object.keys(changes);
-      // The archive is written by the worker whenever a group closes.
-      if (area === "local" && keys.includes(CLOSED_GROUPS_KEY)) refreshGroups();
       const relevant =
         (area === "sync" && keys.some((k) => k in SYNC_DEFAULTS || GCAL_SYNC_KEYS.includes(k))) ||
         (area === "local" && keys.includes(TOKEN_KEY));

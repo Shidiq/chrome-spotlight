@@ -12,6 +12,7 @@ Chrome/Helium extension. One macOS-style Spotlight overlay for URL navigation, s
 ## Use
 
 - Press shortcut on any page (or `Cmd+Shift+O` / `Ctrl+Shift+O`, same overlay) → appears centered, listing open tabs first
+- Clicking the toolbar icon opens the same overlay
 - **Hyper key** (opt-in) binds `⌃⌥⇧⌘`+`Y` to the same overlay — see [Hyper key](#hyper-key) below
 - Type URL, domain, or search query — open tabs, bookmarks, and history are fuzzy-matched live
 - `↑` / `↓` pick a result
@@ -82,16 +83,15 @@ forbids the two together). On those pages, use `⌘⇧O`, or Option A.
 
 ## New tab widgets
 
-Three columns over an animated aurora background, capped at 1440px and centered so rows don't stretch on a wide display. Each card sizes to its content and scrolls internally once it outgrows the column. Every widget can be switched off individually in the extension's options page.
+Two columns over an animated aurora background, capped at 1440px and centered so rows don't stretch on a wide display. Each card sizes to its content and scrolls internally once it outgrows the column. Every widget can be switched off individually in the extension's options page.
 
 - **Clock and Up next** — time and date top-left; the next upcoming calendar event with a live countdown top-right
 - **Agenda** — one grouped list from Google Calendar covering today through the next 8 days, with `Today` always shown as the anchor even when it's empty. Connect one or more Google accounts and pick which calendars appear, per account, in the options page
 - **Tasks** — open items from a Notion database, sorted by priority then due date, with overdue dates flagged. Click the checkbox to mark one Done in Notion. Needs a Notion integration token, pasted in the options page and stored on this device only
-- **Tab groups** — open groups and recently closed ones, same data as the toolbar popup below; click to jump to a group or restore a closed one
 
-Calendar and task data are cached, so the page paints immediately and refreshes in the background every 5 minutes. Tab groups re-read every time the tab becomes visible.
+Calendar and task data are cached, so the page paints immediately and refreshes in the background every 5 minutes.
 
-At narrower widths the layout drops to two columns (tab groups spans the bottom), then to one.
+At narrower widths the columns stop filling the viewport and scroll as one block, then drop to a single column.
 
 ### Connecting Google accounts
 
@@ -107,15 +107,6 @@ A personal account works with the built-in OAuth client. A work or school accoun
 The client ID is remembered per account and stays editable on the account's row, so a wrong one is fixed in place rather than by removing the account. **Remove** revokes the token at Google as well as deleting the local state, so re-adding shows the consent screen again.
 
 When a connection fails, the message names the cause — `access_denied` (not a test user on that project), `admin_policy_enforced` (your Workspace admin blocks the app), `org_internal` (that client only admits its own organization), or a redirect URI that isn't registered.
-
-## Tab groups popup
-
-- Click the toolbar icon → popup lists every open tab group (color dot, name, tab count, window number when groups span multiple windows)
-- Click or `Enter` on a group → un-collapses it, activates its first tab, focuses its window
-- `↑` / `↓` move the selection, `1`-`9` jump straight to a group, `Esc` closes
-- **Recently closed** section lists groups you closed while the extension was running (up to 10) — clicking one reopens its tabs back inside a group with the original name and color
-- If a group with the same name and color is already open, restored tabs join it instead of creating a second group
-- Chrome exposes no API for its own saved tab groups, so groups saved to the bookmarks bar are only reopenable from that chip — the list here covers groups the extension saw close
 
 ## Task View tab switcher
 
