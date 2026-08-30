@@ -27,7 +27,7 @@ Chrome/Helium extension. One macOS-style Spotlight overlay for URL navigation, s
 ## Restricted pages & new tab
 
 - On pages content scripts can't reach (`chrome://`, Web Store, etc.) the shortcut opens the same overlay in a small popup window instead — same keys, same behavior
-- The sidebar handles those pages differently: it falls back to Chrome's native side panel — see [Sidebar](#sidebar)
+- The [sidebar](#sidebar) is unaffected — it lives in Chrome's side panel, which works on every page
 - The new-tab page shows the overlay directly, over the widgets below
 
 ## Hyper key
@@ -88,7 +88,7 @@ Three columns over an animated aurora background, capped at 1440px and centered 
 - **Clock and Up next** — time and date top-left; the next upcoming calendar event with a live countdown top-right
 - **Agenda** — one grouped list from Google Calendar covering today through the next 8 days, with `Today` always shown as the anchor even when it's empty. Connect one or more Google accounts and pick which calendars appear, per account, in the options page
 - **Tasks** — open items from a Notion database, sorted by priority then due date, with overdue dates flagged. Click the checkbox to mark one Done in Notion. Needs a Notion integration token, pasted in the options page and stored on this device only
-- **Tab groups** — open groups and recently closed ones, same data as the toolbar popup below; click to jump to a group or restore a closed one
+- **Tab groups** — open groups and recently closed ones, the same data the [sidebar](#sidebar) shows; click to jump to a group or restore a closed one
 
 Calendar and task data are cached, so the page paints immediately and refreshes in the background every 5 minutes. Tab groups re-read every time the tab becomes visible.
 
@@ -111,9 +111,10 @@ When a connection fails, the message names the cause — `access_denied` (not a 
 
 ## Sidebar
 
-An Arc-style vertical sidebar, toggled with `Cmd+Shift+E` / `Ctrl+Shift+E` or
-by clicking the toolbar icon. It stays open across navigations and new tabs
-until you toggle it off again.
+An Arc-style vertical sidebar in Chrome's side panel, toggled with
+`Cmd+Shift+E` / `Ctrl+Shift+E` or by clicking the toolbar icon. It stays open
+across navigations and new tabs until you toggle it off again, and it works on
+every page including `chrome://`, the Web Store and PDFs.
 
 - **Favorites** — pinned sites. Click one and it jumps to the tab that already
   has it open instead of opening a second copy; the star on any tab row pins it
@@ -121,24 +122,18 @@ until you toggle it off again.
   count, collapsible. Collapse state is the sidebar's own, because Chrome
   refuses to collapse the group holding the active tab
 - **Tabs** — everything ungrouped, in tab-strip order
-- **Recently closed** — the same archive the tab groups popup shows; click to
+- **Recently closed** — groups closed while the extension was running; click to
   restore
-- Search box filters the list live. `Enter` with nothing matching hands the
-  query to the full Spotlight overlay
+- Search box filters the list live. `Enter` with nothing matching opens the
+  query in a new tab, through your chosen search engine
 - `↑` / `↓` move, `Enter` activates, `1`-`9` jump, `Backspace` closes the
   selected tab. Middle-click or the `×` closes a row
-- Drag the sidebar's inner edge to resize
 
-By default the page is narrowed to make room rather than covered. Elements a
-site pins to the viewport (some full-width fixed headers) can't always be
-moved, and full-bleed `100vw` blocks get clipped at their far edge — options
-has a per-site exclusion list for anything that reacts badly, plus a switch to
-let the sidebar float over the page instead.
-
-On pages content scripts can't reach, the shortcut opens the same sidebar in
-Chrome's native side panel instead. On a PDF the first press may still miss —
-the URL looks ordinary, so the extension only learns there's no content script
-after trying once.
+Chrome owns the panel's frame: which edge it opens on and how wide it is are
+its own side panel settings — drag the panel's inner edge to resize, or
+right-click it to move it to the other side. Because it's a real browser panel
+it sits beside the page rather than over it, with no injected CSS and nothing
+for a site's own layout to fight.
 
 ## Tab groups
 

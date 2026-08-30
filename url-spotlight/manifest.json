@@ -43,22 +43,13 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["loader.js", "loading.js", "sidebar-shift.js"],
+      "js": ["loader.js", "loading.js"],
       "run_at": "document_start",
       "all_frames": false
     },
     {
       "matches": ["<all_urls>"],
-      "js": [
-        "loader.js",
-        "query.js",
-        "content.js",
-        "tabgroups.js",
-        "sidebar-css.js",
-        "sidebar-data.js",
-        "sidebar-view.js",
-        "sidebar.js"
-      ],
+      "js": ["loader.js", "query.js", "content.js"],
       "run_at": "document_idle",
       "all_frames": false
     }

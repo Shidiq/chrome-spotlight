@@ -44,11 +44,7 @@
   /* Symmetric padding centres the grid without a wrapper element. Percentages
      resolve against the viewport-sized containing block, so unlike 100vw this
      does not overshoot when a scrollbar is present. */
-  /* The sidebar can't push a position:fixed grid, so it gets its width back as
-     inline-start padding instead. --sp-sb-w is set on <html> by
-     sidebar-shift.js and resolves to 0px whenever the sidebar is closed. */
-  padding: 32px max(32px, calc((100% - 1440px) / 2)) 32px
-    calc(max(32px, calc((100% - 1440px) / 2)) + var(--sp-sb-w, 0px));
+  padding: 32px max(32px, calc((100% - 1440px) / 2));
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 0.95fr);
   grid-template-rows: auto minmax(0, 1fr);

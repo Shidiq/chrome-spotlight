@@ -1,7 +1,6 @@
-// Side panel surface. Same view as the injected overlay, minus the page-push
-// and the resize handle — Chrome owns the panel's frame and width. This is the
-// surface that still works on chrome:// pages, the Web Store and PDFs, where
-// no content script can run.
+// The sidebar's only surface. Chrome owns the panel's frame, side and width,
+// and it works everywhere a content script cannot — chrome:// pages, the Web
+// Store, PDFs.
 (() => {
   "use strict";
 
@@ -11,7 +10,6 @@
     void chrome.runtime.lastError;
     view = self.SpSidebarView.create({
       root: document.body,
-      surface: "panel",
       // Pin the panel to the window it opened in. Without this the model would
       // fall back to the last focused window and show the wrong tabs whenever
       // focus moves elsewhere.
@@ -20,8 +18,8 @@
     });
   });
 
-  // The toggle shortcut flips one flag for every surface; there is no
-  // sidePanel.close(), so the panel closes itself when the flag goes false.
+  // There is no sidePanel.close(), so the toggle closes the panel by flipping
+  // this flag and letting the panel close itself.
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "local" && changes.sidebarOpen && !changes.sidebarOpen.newValue) {
       if (view) view.destroy();

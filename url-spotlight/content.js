@@ -3,9 +3,6 @@
   // document_idle injection — a second copy would register a duplicate
   // message listener and instantly open+close the overlay.
   if (window.__spotlightContent) return;
-  // Placeholder first: the guard above only needs truthiness, and the real
-  // handle (used by the sidebar to hand a query off) is assigned at the bottom
-  // once open/close exist.
   window.__spotlightContent = true;
 
   const DEFAULT_ENGINE = self.SpQuery.DEFAULT_ENGINE;
@@ -273,9 +270,7 @@
     debounceTimer = setTimeout(() => requestSuggestions(trimmed), 80);
   }
 
-  // `prefill` seeds the query box — the sidebar hands its search text over
-  // when the user asks for a full spotlight search.
-  function open(prefill) {
+  function open() {
     if (hostEl) return;
     allTabs = [];
     tabUrls = new Set();
@@ -569,14 +564,7 @@
 
     requestAnimationFrame(() => panel.classList.add("visible"));
     inputEl = input;
-    setTimeout(() => {
-      input.focus();
-      input.select();
-    }, 0);
-    if (prefill) {
-      input.value = prefill;
-      onInputChange(prefill);
-    }
+    setTimeout(() => input.focus(), 0);
 
     chrome.runtime.sendMessage(
       { type: "GET_TABS", excludeSelf: true },
@@ -957,7 +945,5 @@
     taskViewCommitOnArrival = false;
     if (taskViewActive) commitTaskView();
   });
-
-  window.__spotlightContent = { open, close, isOpen: () => !!hostEl };
 
 })();

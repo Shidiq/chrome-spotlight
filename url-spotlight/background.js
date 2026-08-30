@@ -68,21 +68,14 @@ function archiveClosedGroup(group) {
 }
 
 // --- Sidebar -------------------------------------------------------------
-// Both sidebar surfaces (the injected overlay and the side panel) hold a
-// long-lived port so the worker can tell them the model went stale. A port
-// works from a content script and from an extension page, so there is one
-// code path instead of a tabs.sendMessage broadcast that would have to
-// enumerate every tab and swallow lastError for the script-less ones.
+// Each open side panel holds a long-lived port so the worker can tell it the
+// model went stale.
 const sidebarPorts = new Set();
-// windowId -> port, for the panels only. Lets the toggle know whether a panel
-// is already up in this window without an async lookup.
+// windowId -> port. Lets the toggle know whether a panel is already up in this
+// window without an async lookup, which the user-gesture rule forbids.
 const panelWindows = new Map();
-// Tabs that answered no ping, i.e. have no content script (PDF viewer, a page
-// injected before install). Must be readable synchronously by the command
-// handler, so it lives in memory rather than storage.
-const noOverlayTabs = new Set();
-// Mirror of storage.local.sidebarOpen. Same reason: sidePanel.open() has to be
-// called before anything async, so the toggle cannot await a storage read.
+// Mirror of storage.local.sidebarOpen: sidePanel.open() has to be called
+// before anything async, so the toggle cannot await a storage read.
 let sidebarOpenCache = false;
 let broadcastTimer = null;
 
@@ -113,11 +106,8 @@ function scheduleBroadcast() {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "sp-sidebar") return;
   sidebarPorts.add(port);
-  // A content-script port carries sender.tab; a side-panel port does not.
-  // That is how the two surfaces are told apart.
-  const isPanel = !port.sender || !port.sender.tab;
   port.onMessage.addListener((msg) => {
-    if (isPanel && msg && msg.type === "SIDEBAR_HELLO" && msg.windowId != null) {
+    if (msg && msg.type === "SIDEBAR_HELLO" && msg.windowId != null) {
       panelWindows.set(msg.windowId, port);
     }
   });
@@ -130,31 +120,18 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
-// Fire-and-forget probe: a tab that does not ACK has no content script, so the
-// next toggle in it goes straight to the side panel.
-function probeOverlay(tabId) {
-  if (tabId == null) return;
-  chrome.tabs.sendMessage(tabId, { type: "SIDEBAR_PING" }, (res) => {
-    if (chrome.runtime.lastError || !res || !res.ok) noOverlayTabs.add(tabId);
-    else noOverlayTabs.delete(tabId);
-  });
-}
-
 function handleSidebarCommand(tab) {
   const windowId = tab && tab.windowId != null ? tab.windowId : null;
-  const needPanel =
-    !tab || isRestrictedUrl(tab.url) || (tab.id != null && noOverlayTabs.has(tab.id));
-  // On a panel-only page, follow whether this window's panel is actually up
-  // rather than the global flag: the user can dismiss a panel with Chrome's own
-  // close button, which leaves the flag set and would otherwise cost them a
-  // wasted press to get it back.
+  // Follow whether this window's panel is actually up rather than the stored
+  // flag: the user can dismiss a panel with Chrome's own close button, which
+  // leaves the flag set and would otherwise cost a wasted press to get back.
   const panelUp = windowId != null && panelWindows.has(windowId);
-  const next = needPanel ? !panelUp : !sidebarOpenCache;
+  const next = !panelUp;
 
   // MUST be the first statement on the opening path. sidePanel.open() only
   // works while the command's user gesture is live, and any await before it
   // (a storage read, a tabs query) drops that gesture.
-  if (next && needPanel && windowId != null && chrome.sidePanel && chrome.sidePanel.open) {
+  if (next && windowId != null && chrome.sidePanel && chrome.sidePanel.open) {
     try {
       const p = chrome.sidePanel.open({ windowId });
       if (p && p.catch) {
@@ -165,13 +142,10 @@ function handleSidebarCommand(tab) {
     }
   }
 
-  // One flag drives every surface: overlays react through storage.onChanged,
-  // and the panel closes itself when it turns false. No fan-out messaging.
+  // There is no sidePanel.close(), so closing goes through the flag: the panel
+  // watches it and closes itself when it turns false.
   sidebarOpenCache = next;
   chrome.storage.local.set({ sidebarOpen: next }, () => void chrome.runtime.lastError);
-
-  // Learn whether this tab can host the overlay, for the next press.
-  if (tab && tab.id != null && !isRestrictedUrl(tab.url)) probeOverlay(tab.id);
 }
 
 // Builds the one-window model the sidebar renders: groups in tab-strip order,
@@ -283,10 +257,7 @@ chrome.tabs.onMoved.addListener(onTabsChanged);
 chrome.tabs.onActivated.addListener(scheduleBroadcast);
 chrome.tabs.onDetached.addListener(onTabsChanged);
 chrome.tabs.onReplaced.addListener(onTabsChanged);
-chrome.tabs.onRemoved.addListener((tabId) => {
-  noOverlayTabs.delete(tabId);
-  onTabsChanged();
-});
+chrome.tabs.onRemoved.addListener(onTabsChanged);
 chrome.tabs.onAttached.addListener(onTabsChanged);
 chrome.windows.onFocusChanged.addListener(scheduleBroadcast);
 
@@ -364,19 +335,9 @@ function sendToggle(tabId, msgType, command, isRetry) {
     chrome.scripting.executeScript(
       {
         target: { tabId },
-        // Same order as the manifest content_scripts entry — query.js before
-        // content.js, tabgroups.js before sidebar-css.js.
-        files: [
-          "loader.js",
-          "loading.js",
-          "query.js",
-          "content.js",
-          "tabgroups.js",
-          "sidebar-css.js",
-          "sidebar-data.js",
-          "sidebar-view.js",
-          "sidebar.js",
-        ],
+        // Same order as the manifest content_scripts entry: query.js defines
+        // the helpers content.js reads at load.
+        files: ["loader.js", "loading.js", "query.js", "content.js"],
       },
       () => {
         if (chrome.runtime.lastError) {
@@ -421,12 +382,11 @@ function openPopupFallback(command, originTabId) {
   });
 }
 
-// Toolbar icon toggles the sidebar. Deliberately not
-// sidePanel.setPanelBehavior({openPanelOnActionClick:true}): that would hand
-// the click to Chrome and always force the native panel, where this routes
-// through the same logic as the shortcut and prefers the inline overlay on
-// pages that can host it. (It also only works with no default_popup set, which
-// is why the tab groups popup is gone — the sidebar lists groups itself.)
+// Toolbar icon toggles the panel. Deliberately not
+// sidePanel.setPanelBehavior({openPanelOnActionClick:true}): that only opens,
+// never closes, so the icon would stop being a toggle. onClicked also fires
+// only with no default_popup set, which is why the tab groups popup is gone —
+// the sidebar lists groups itself.
 chrome.action.onClicked.addListener((tab) => {
   handleSidebarCommand(tab);
 });

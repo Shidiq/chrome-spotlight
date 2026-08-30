@@ -1,7 +1,5 @@
-// The sidebar stylesheet, as a string. Both surfaces append it as a <style>:
-// the overlay into a closed shadow root (where a <link> to an extension file
-// would need a web_accessible_resources entry), the side panel into its head.
-// One source, so the two surfaces can't drift apart.
+// The sidebar stylesheet, as a string rather than a linked file, so the group
+// dot colors can be generated from the same table tabgroups.js uses.
 (() => {
   "use strict";
   if (self.SpSidebarCSS) return;
@@ -17,9 +15,7 @@
 
   function build() {
     return `
-  /* :host matches only in a shadow root, :root only in a document. Both are
-     valid selectors either way, so one rule list serves both surfaces. */
-  :host, :root {
+  :root {
     --sp-sb-bg: rgba(28, 30, 38, 0.98);
     --sp-sb-bg-solid: #1c1e26;
     --sp-text: #ffffff;
@@ -37,7 +33,7 @@
 ${groupVars("dark")}
   }
   @media (prefers-color-scheme: light) {
-    :host, :root {
+    :root {
       --sp-sb-bg: rgba(246, 246, 248, 0.98);
       --sp-sb-bg-solid: #f6f6f8;
       --sp-text: #1d1d1f;
@@ -55,7 +51,7 @@ ${groupVars("light")}
     }
   }
 
-  :host, :host *, .sp-sb, .sp-sb * { box-sizing: border-box; }
+  .sp-sb, .sp-sb * { box-sizing: border-box; }
 
   .sp-sb {
     display: flex;
@@ -70,12 +66,6 @@ ${groupVars("light")}
     line-height: 1.35;
     overflow: hidden;
   }
-  .sp-sb.overlay {
-    border-right: 0.5px solid var(--sp-border);
-    box-shadow: var(--sp-panel-shadow);
-  }
-  .sp-sb.overlay.right { border-right: 0; border-left: 0.5px solid var(--sp-border); }
-
   /* --- top bar --- */
   .sp-sb-top {
     flex: 0 0 auto;
@@ -299,19 +289,6 @@ ${Object.keys((self.SpTabGroups && self.SpTabGroups.COLORS) || {})
     font-size: 11px;
   }
   .sp-sb-foot .spacer { flex: 1 1 auto; }
-
-  /* --- overlay-only chrome --- */
-  .sp-sb-resize {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 6px;
-    cursor: col-resize;
-    z-index: 2;
-  }
-  .sp-sb-resize:hover { background: var(--sp-accent); opacity: 0.5; }
-  .sp-sb-resize.left { right: 0; }
-  .sp-sb-resize.right { left: 0; }
 `;
   }
 
