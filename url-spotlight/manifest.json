@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
+  "minimum_chrome_version": "116",
   "name": "URL Spotlight",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Spotlight-style overlay to search open tabs, bookmarks, and history — or open any URL — from any page.",
-  "permissions": ["activeTab", "tabs", "tabGroups", "bookmarks", "history", "storage", "scripting", "favicon", "identity"],
+  "permissions": ["activeTab", "tabs", "tabGroups", "bookmarks", "history", "storage", "scripting", "favicon", "identity", "sidePanel"],
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxr5HhT5BS6RnV3dSQtSoGNzLdv8UDZUs4QJBS8eSwyQigbAmE7NAnnYxGFjVV1oG19IPdYJwHTpFHZcHxWMPpY1qugQKs/ujk1bR9NjGSC4Pss0UYY+q4eYV/rPWf1pDFOhDtbGGw0YRtQmZvPNGiE/7Hmamimz/I5Ukc7P+tGutjhzVSoNHOZb5Q9G0uuK4llMMAJ5JZGOIur4xrMbkAVPmB0PojcVHfKE+6Mg22qpcsPzgjYGzvi+Vy/eDIWzPNmtq/sUprCE52EyrMcpRqTYNTjRjTkec0w2ljwKBZkCNh/3lDpaUP8+CPA3aB2hsF+Et0WndLpXxroROm/ZeMQIDAQAB",
   "oauth2": {
     "client_id": "387650594829-kj4us7ndd4bfq09204h43cf447j797cs.apps.googleusercontent.com",
@@ -27,8 +28,7 @@
       "16": "icons/icon16.png",
       "32": "icons/icon32.png"
     },
-    "default_popup": "groups.html",
-    "default_title": "Tab groups"
+    "default_title": "Toggle sidebar"
   },
   "options_ui": {
     "page": "options.html",
@@ -37,16 +37,28 @@
   "background": {
     "service_worker": "background.js"
   },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["loader.js", "loading.js"],
+      "js": ["loader.js", "loading.js", "sidebar-shift.js"],
       "run_at": "document_start",
       "all_frames": false
     },
     {
       "matches": ["<all_urls>"],
-      "js": ["loader.js", "content.js"],
+      "js": [
+        "loader.js",
+        "query.js",
+        "content.js",
+        "tabgroups.js",
+        "sidebar-css.js",
+        "sidebar-data.js",
+        "sidebar-view.js",
+        "sidebar.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }
@@ -68,6 +80,13 @@
         "mac": "Command+Shift+O"
       },
       "description": "Open Spotlight (alternate shortcut)"
+    },
+    "toggle-sidebar": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+E",
+        "mac": "Command+Shift+E"
+      },
+      "description": "Toggle sidebar"
     }
   }
 }

@@ -239,6 +239,35 @@
       line-height: 1.5;
     }
     .cal-error:empty { display: none; }
+    .setting-control select {
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid var(--sp-card-border);
+      background: var(--sp-page-bg);
+      color: var(--sp-text);
+      font-size: 12px;
+    }
+    .setting-control input[type="range"] { width: 140px; accent-color: var(--sp-accent); }
+    .setting-control .range-val {
+      min-width: 44px;
+      color: var(--sp-sub);
+      font-size: 12px;
+      text-align: right;
+    }
+    textarea {
+      width: 100%;
+      min-height: 76px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--sp-card-border);
+      background: var(--sp-page-bg);
+      color: var(--sp-text);
+      font-size: 12px;
+      font-family: inherit;
+      resize: vertical;
+      outline: none;
+    }
+    textarea:focus { border-color: var(--sp-accent); }
   </style>
 </head>
 <body>
@@ -270,6 +299,60 @@
       </div>
     </div>
     <div class="status" id="status">Saved</div>
+  </div>
+  <div class="card">
+    <h1>Sidebar</h1>
+    <p class="sub">A vertical tab list beside the page, toggled by a keyboard shortcut</p>
+    <div class="shortcut-row">
+      <button type="button" class="shortcut-btn" id="sidebarShortcutBtn">Set the shortcut in Chrome</button>
+    </div>
+    <p class="field-note">Chrome owns extension shortcuts — this opens its shortcuts page.</p>
+    <div class="setting-row">
+      <div class="setting-main">
+        <span class="setting-title">Enable sidebar</span>
+        <span class="setting-desc">Turn off to keep the overlay and side panel out of every page.</span>
+      </div>
+      <div class="setting-control">
+        <input type="checkbox" id="sidebarEnabled">
+      </div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-main">
+        <span class="setting-title">Side</span>
+        <span class="setting-desc">Which edge the injected sidebar sits on. The native side panel follows Chrome's own setting.</span>
+      </div>
+      <div class="setting-control">
+        <select id="sidebarSide">
+          <option value="left">Left</option>
+          <option value="right">Right</option>
+        </select>
+      </div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-main">
+        <span class="setting-title">Push page content aside</span>
+        <span class="setting-desc">Off means the sidebar floats over the page instead of narrowing it. Elements the page pins to the viewport can't always be moved.</span>
+      </div>
+      <div class="setting-control">
+        <input type="checkbox" id="sidebarPushPage">
+      </div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-main">
+        <span class="setting-title">Width</span>
+        <span class="setting-desc">Or drag the sidebar's inner edge.</span>
+      </div>
+      <div class="setting-control">
+        <input type="range" id="sidebarWidth" min="200" max="480" step="10">
+        <span class="range-val" id="sidebarWidthVal">260px</span>
+      </div>
+    </div>
+    <div class="field">
+      <label for="sidebarExcluded">Never show on these sites</label>
+      <textarea id="sidebarExcluded" spellcheck="false" placeholder="docs.google.com"></textarea>
+      <p class="field-note">One per line. A bare host, or host plus a path prefix (<code>www.google.com/maps</code>). Use this for canvas apps that misread the narrowed viewport.</p>
+    </div>
+    <div class="status" id="sidebarStatus">Saved</div>
   </div>
   <div class="card">
     <h1>Google Calendar</h1>
@@ -342,6 +425,7 @@
     </div>
     <div class="status" id="widgetStatus">Saved</div>
   </div>
+  <script src="query.js"></script>
   <script src="gcal.js"></script>
   <script src="loader.js"></script>
   <script src="options.js"></script>

@@ -3,16 +3,12 @@
   // document_idle injection — a second copy would register a duplicate
   // message listener and instantly open+close the overlay.
   if (window.__spotlightContent) return;
+  // Placeholder first: the guard above only needs truthiness, and the real
+  // handle (used by the sidebar to hand a query off) is assigned at the bottom
+  // once open/close exist.
   window.__spotlightContent = true;
 
-  const SEARCH_ENGINES = {
-    duckduckgo: { name: "DuckDuckGo", url: "https://duckduckgo.com/?q=" },
-    google: { name: "Google", url: "https://www.google.com/search?q=" },
-    brave: { name: "Brave", url: "https://search.brave.com/search?q=" },
-    startpage: { name: "Startpage", url: "https://www.startpage.com/sp/search?query=" },
-    bing: { name: "Bing", url: "https://www.bing.com/search?q=" }
-  };
-  const DEFAULT_ENGINE = "duckduckgo";
+  const DEFAULT_ENGINE = self.SpQuery.DEFAULT_ENGINE;
   const DEFAULT_TASKVIEW_SHORTCUT = { alt: true, ctrl: false, shift: false, meta: false, key: "Tab" };
   // "Hyper" is always all four modifiers, so only the physical key is stored.
   const DEFAULT_HYPER_SHORTCUT = { enabled: false, code: "KeyY" };
@@ -56,12 +52,7 @@
   });
 
   function resolveQuery(raw) {
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    if (/^https?:\/\//i.test(trimmed)) return trimmed;
-    if (!/\s/.test(trimmed) && /\./.test(trimmed)) return "https://" + trimmed;
-    const engine = SEARCH_ENGINES[searchEngine] || SEARCH_ENGINES[DEFAULT_ENGINE];
-    return engine.url + encodeURIComponent(trimmed);
+    return self.SpQuery.resolve(raw, searchEngine);
   }
 
   function close() {
@@ -109,25 +100,7 @@
     else navigate(s.url, newTab);
   }
 
-  // Case-insensitive subsequence match. Returns a score (higher is better),
-  // or -1 if not every query char is found in order.
-  function fuzzyScore(query, text) {
-    if (!query) return 0;
-    const q = query.toLowerCase();
-    const t = (text || "").toLowerCase();
-    let qi = 0;
-    let score = 0;
-    let prevIdx = -1;
-    for (let ti = 0; ti < t.length && qi < q.length; ti++) {
-      if (t[ti] === q[qi]) {
-        score += prevIdx === ti - 1 ? 3 : 1; // contiguous-run bonus
-        if (ti === 0) score += 2; // start-of-string boost
-        prevIdx = ti;
-        qi++;
-      }
-    }
-    return qi === q.length ? score : -1;
-  }
+  const fuzzyScore = self.SpQuery.fuzzyScore;
 
   function toTabSuggestion(t) {
     return {
@@ -300,7 +273,9 @@
     debounceTimer = setTimeout(() => requestSuggestions(trimmed), 80);
   }
 
-  function open() {
+  // `prefill` seeds the query box — the sidebar hands its search text over
+  // when the user asks for a full spotlight search.
+  function open(prefill) {
     if (hostEl) return;
     allTabs = [];
     tabUrls = new Set();
@@ -594,7 +569,14 @@
 
     requestAnimationFrame(() => panel.classList.add("visible"));
     inputEl = input;
-    setTimeout(() => input.focus(), 0);
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+    if (prefill) {
+      input.value = prefill;
+      onInputChange(prefill);
+    }
 
     chrome.runtime.sendMessage(
       { type: "GET_TABS", excludeSelf: true },
@@ -975,5 +957,7 @@
     taskViewCommitOnArrival = false;
     if (taskViewActive) commitTaskView();
   });
+
+  window.__spotlightContent = { open, close, isOpen: () => !!hostEl };
 
 })();

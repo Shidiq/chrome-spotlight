@@ -1,11 +1,5 @@
-const SEARCH_ENGINES = {
-  duckduckgo: { name: "DuckDuckGo", url: "https://duckduckgo.com/?q=" },
-  google: { name: "Google", url: "https://www.google.com/search?q=" },
-  brave: { name: "Brave", url: "https://search.brave.com/search?q=" },
-  startpage: { name: "Startpage", url: "https://www.startpage.com/sp/search?query=" },
-  bing: { name: "Bing", url: "https://www.bing.com/search?q=" }
-};
-const DEFAULT_ENGINE = "duckduckgo";
+const SEARCH_ENGINES = self.SpQuery.SEARCH_ENGINES;
+const DEFAULT_ENGINE = self.SpQuery.DEFAULT_ENGINE;
 const DEFAULT_TASKVIEW_SHORTCUT = { alt: true, ctrl: false, shift: false, meta: false, key: "Tab" };
 // "Hyper" is always all four modifiers, so only the physical key is stored.
 const DEFAULT_HYPER_SHORTCUT = { enabled: false, code: "KeyY" };
@@ -544,3 +538,82 @@ notionTokenInput.addEventListener(
   "input",
   debounce(() => chrome.storage.local.set({ notionToken: notionTokenInput.value.trim() }, showWidgetSaved), 300)
 );
+
+// --- Sidebar ---------------------------------------------------------------
+// This card writes to two storage areas on purpose: the width lives in local
+// alongside the open/closed flag, because sidebar-shift.js reads both at
+// document_start and sync is too slow (and too quota-limited) for that path.
+const SIDEBAR_SYNC_DEFAULTS = {
+  sidebarEnabled: true,
+  sidebarSide: "left",
+  sidebarPushPage: true,
+  sidebarExcludedHosts: ["docs.google.com", "www.google.com/maps", "meet.google.com"],
+};
+const SIDEBAR_LOCAL_DEFAULTS = { sidebarWidth: 260 };
+
+const sidebarEnabled = document.getElementById("sidebarEnabled");
+const sidebarSide = document.getElementById("sidebarSide");
+const sidebarPushPage = document.getElementById("sidebarPushPage");
+const sidebarWidth = document.getElementById("sidebarWidth");
+const sidebarWidthVal = document.getElementById("sidebarWidthVal");
+const sidebarExcluded = document.getElementById("sidebarExcluded");
+const sidebarShortcutBtn = document.getElementById("sidebarShortcutBtn");
+const sidebarStatus = document.getElementById("sidebarStatus");
+
+let sidebarStatusTimer = null;
+function showSidebarSaved() {
+  void chrome.runtime.lastError;
+  sidebarStatus.classList.add("show");
+  clearTimeout(sidebarStatusTimer);
+  sidebarStatusTimer = setTimeout(() => sidebarStatus.classList.remove("show"), 1500);
+}
+
+chrome.storage.sync.get(SIDEBAR_SYNC_DEFAULTS, (r) => {
+  void chrome.runtime.lastError;
+  sidebarEnabled.checked = !!r.sidebarEnabled;
+  sidebarSide.value = r.sidebarSide === "right" ? "right" : "left";
+  sidebarPushPage.checked = !!r.sidebarPushPage;
+  sidebarExcluded.value = (r.sidebarExcludedHosts || []).join("\n");
+});
+chrome.storage.local.get(SIDEBAR_LOCAL_DEFAULTS, (r) => {
+  void chrome.runtime.lastError;
+  sidebarWidth.value = r.sidebarWidth;
+  sidebarWidthVal.textContent = r.sidebarWidth + "px";
+});
+
+sidebarEnabled.addEventListener("change", () => {
+  chrome.storage.sync.set({ sidebarEnabled: sidebarEnabled.checked }, showSidebarSaved);
+});
+sidebarSide.addEventListener("change", () => {
+  chrome.storage.sync.set({ sidebarSide: sidebarSide.value }, showSidebarSaved);
+});
+sidebarPushPage.addEventListener("change", () => {
+  chrome.storage.sync.set({ sidebarPushPage: sidebarPushPage.checked }, showSidebarSaved);
+});
+sidebarWidth.addEventListener("input", () => {
+  sidebarWidthVal.textContent = sidebarWidth.value + "px";
+});
+sidebarWidth.addEventListener(
+  "input",
+  debounce(() => {
+    chrome.storage.local.set({ sidebarWidth: Number(sidebarWidth.value) }, showSidebarSaved);
+  }, 300)
+);
+sidebarExcluded.addEventListener(
+  "input",
+  debounce(() => {
+    const hosts = sidebarExcluded.value
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    chrome.storage.sync.set({ sidebarExcludedHosts: hosts }, showSidebarSaved);
+  }, 300)
+);
+
+// An <a href="chrome://…"> won't navigate from an extension page, so open it
+// as a tab instead.
+sidebarShortcutBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: "chrome://extensions/shortcuts" }, () => {
+    void chrome.runtime.lastError;
+  });
+});

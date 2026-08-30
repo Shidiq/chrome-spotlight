@@ -27,6 +27,7 @@ Chrome/Helium extension. One macOS-style Spotlight overlay for URL navigation, s
 ## Restricted pages & new tab
 
 - On pages content scripts can't reach (`chrome://`, Web Store, etc.) the shortcut opens the same overlay in a small popup window instead — same keys, same behavior
+- The sidebar handles those pages differently: it falls back to Chrome's native side panel — see [Sidebar](#sidebar)
 - The new-tab page shows the overlay directly, over the widgets below
 
 ## Hyper key
@@ -108,14 +109,53 @@ The client ID is remembered per account and stays editable on the account's row,
 
 When a connection fails, the message names the cause — `access_denied` (not a test user on that project), `admin_policy_enforced` (your Workspace admin blocks the app), `org_internal` (that client only admits its own organization), or a redirect URI that isn't registered.
 
-## Tab groups popup
+## Sidebar
 
-- Click the toolbar icon → popup lists every open tab group (color dot, name, tab count, window number when groups span multiple windows)
-- Click or `Enter` on a group → un-collapses it, activates its first tab, focuses its window
-- `↑` / `↓` move the selection, `1`-`9` jump straight to a group, `Esc` closes
-- **Recently closed** section lists groups you closed while the extension was running (up to 10) — clicking one reopens its tabs back inside a group with the original name and color
-- If a group with the same name and color is already open, restored tabs join it instead of creating a second group
-- Chrome exposes no API for its own saved tab groups, so groups saved to the bookmarks bar are only reopenable from that chip — the list here covers groups the extension saw close
+An Arc-style vertical sidebar, toggled with `Cmd+Shift+E` / `Ctrl+Shift+E` or
+by clicking the toolbar icon. It stays open across navigations and new tabs
+until you toggle it off again.
+
+- **Favorites** — pinned sites. Click one and it jumps to the tab that already
+  has it open instead of opening a second copy; the star on any tab row pins it
+- **Groups** — every tab group in this window, with its Chrome color and tab
+  count, collapsible. Collapse state is the sidebar's own, because Chrome
+  refuses to collapse the group holding the active tab
+- **Tabs** — everything ungrouped, in tab-strip order
+- **Recently closed** — the same archive the tab groups popup shows; click to
+  restore
+- Search box filters the list live. `Enter` with nothing matching hands the
+  query to the full Spotlight overlay
+- `↑` / `↓` move, `Enter` activates, `1`-`9` jump, `Backspace` closes the
+  selected tab. Middle-click or the `×` closes a row
+- Drag the sidebar's inner edge to resize
+
+By default the page is narrowed to make room rather than covered. Elements a
+site pins to the viewport (some full-width fixed headers) can't always be
+moved, and full-bleed `100vw` blocks get clipped at their far edge — options
+has a per-site exclusion list for anything that reacts badly, plus a switch to
+let the sidebar float over the page instead.
+
+On pages content scripts can't reach, the shortcut opens the same sidebar in
+Chrome's native side panel instead. On a PDF the first press may still miss —
+the URL looks ordinary, so the extension only learns there's no content script
+after trying once.
+
+## Tab groups
+
+Tab groups live in the [sidebar](#sidebar) — the toolbar icon toggles it, the
+same as the keyboard shortcut. (Earlier versions opened a dedicated tab groups
+popup here.)
+
+- Every open group in the window: color dot, name, tab count, collapsible
+- Click a group's tab to switch to it; click the group heading to fold it away
+- **Recently closed** lists groups you closed while the extension was running
+  (up to 10) — clicking one reopens its tabs back inside a group with the
+  original name and color
+- If a group with the same name and color is already open, restored tabs join
+  it instead of creating a second group
+- Chrome exposes no API for its own saved tab groups, so groups saved to the
+  bookmarks bar are only reopenable from that chip — the list here covers
+  groups the extension saw close
 
 ## Task View tab switcher
 

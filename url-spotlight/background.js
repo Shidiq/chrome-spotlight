@@ -67,21 +67,258 @@ function archiveClosedGroup(group) {
   });
 }
 
-chrome.tabGroups.onCreated.addListener(scheduleSnapshot);
-chrome.tabGroups.onUpdated.addListener(scheduleSnapshot);
-chrome.tabGroups.onMoved.addListener(scheduleSnapshot);
+// --- Sidebar -------------------------------------------------------------
+// Both sidebar surfaces (the injected overlay and the side panel) hold a
+// long-lived port so the worker can tell them the model went stale. A port
+// works from a content script and from an extension page, so there is one
+// code path instead of a tabs.sendMessage broadcast that would have to
+// enumerate every tab and swallow lastError for the script-less ones.
+const sidebarPorts = new Set();
+// windowId -> port, for the panels only. Lets the toggle know whether a panel
+// is already up in this window without an async lookup.
+const panelWindows = new Map();
+// Tabs that answered no ping, i.e. have no content script (PDF viewer, a page
+// injected before install). Must be readable synchronously by the command
+// handler, so it lives in memory rather than storage.
+const noOverlayTabs = new Set();
+// Mirror of storage.local.sidebarOpen. Same reason: sidePanel.open() has to be
+// called before anything async, so the toggle cannot await a storage read.
+let sidebarOpenCache = false;
+let broadcastTimer = null;
+
+chrome.storage.local.get({ sidebarOpen: false }, (r) => {
+  void chrome.runtime.lastError;
+  sidebarOpenCache = !!(r && r.sidebarOpen);
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.sidebarOpen) {
+    sidebarOpenCache = !!changes.sidebarOpen.newValue;
+  }
+});
+
+function scheduleBroadcast() {
+  if (broadcastTimer) clearTimeout(broadcastTimer);
+  broadcastTimer = setTimeout(() => {
+    broadcastTimer = null;
+    for (const port of sidebarPorts) {
+      try {
+        port.postMessage({ type: "SIDEBAR_DIRTY" });
+      } catch (err) {
+        void err; // port died between disconnect and this tick
+      }
+    }
+  }, 40);
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "sp-sidebar") return;
+  sidebarPorts.add(port);
+  // A content-script port carries sender.tab; a side-panel port does not.
+  // That is how the two surfaces are told apart.
+  const isPanel = !port.sender || !port.sender.tab;
+  port.onMessage.addListener((msg) => {
+    if (isPanel && msg && msg.type === "SIDEBAR_HELLO" && msg.windowId != null) {
+      panelWindows.set(msg.windowId, port);
+    }
+  });
+  port.onDisconnect.addListener(() => {
+    void chrome.runtime.lastError;
+    sidebarPorts.delete(port);
+    for (const [windowId, p] of panelWindows) {
+      if (p === port) panelWindows.delete(windowId);
+    }
+  });
+});
+
+// Fire-and-forget probe: a tab that does not ACK has no content script, so the
+// next toggle in it goes straight to the side panel.
+function probeOverlay(tabId) {
+  if (tabId == null) return;
+  chrome.tabs.sendMessage(tabId, { type: "SIDEBAR_PING" }, (res) => {
+    if (chrome.runtime.lastError || !res || !res.ok) noOverlayTabs.add(tabId);
+    else noOverlayTabs.delete(tabId);
+  });
+}
+
+function handleSidebarCommand(tab) {
+  const windowId = tab && tab.windowId != null ? tab.windowId : null;
+  const needPanel =
+    !tab || isRestrictedUrl(tab.url) || (tab.id != null && noOverlayTabs.has(tab.id));
+  // On a panel-only page, follow whether this window's panel is actually up
+  // rather than the global flag: the user can dismiss a panel with Chrome's own
+  // close button, which leaves the flag set and would otherwise cost them a
+  // wasted press to get it back.
+  const panelUp = windowId != null && panelWindows.has(windowId);
+  const next = needPanel ? !panelUp : !sidebarOpenCache;
+
+  // MUST be the first statement on the opening path. sidePanel.open() only
+  // works while the command's user gesture is live, and any await before it
+  // (a storage read, a tabs query) drops that gesture.
+  if (next && needPanel && windowId != null && chrome.sidePanel && chrome.sidePanel.open) {
+    try {
+      const p = chrome.sidePanel.open({ windowId });
+      if (p && p.catch) {
+        p.catch((err) => console.log("[spotlight bg] sidePanel.open failed:", err && err.message));
+      }
+    } catch (err) {
+      console.log("[spotlight bg] sidePanel.open threw:", err && err.message);
+    }
+  }
+
+  // One flag drives every surface: overlays react through storage.onChanged,
+  // and the panel closes itself when it turns false. No fan-out messaging.
+  sidebarOpenCache = next;
+  chrome.storage.local.set({ sidebarOpen: next }, () => void chrome.runtime.lastError);
+
+  // Learn whether this tab can host the overlay, for the next press.
+  if (tab && tab.id != null && !isRestrictedUrl(tab.url)) probeOverlay(tab.id);
+}
+
+// Builds the one-window model the sidebar renders: groups in tab-strip order,
+// then ungrouped tabs, plus the recently-closed archive.
+function buildSidebarModel(windowId, sendResponse) {
+  chrome.tabs.query({}, (allTabs) => {
+    void chrome.runtime.lastError;
+    const tabs = (allTabs || []).filter((t) => t.windowId === windowId && t.id != null);
+    // tabs.query returns tab-strip order (pinned tabs first), which is exactly
+    // the order a sidebar wants — unlike GET_TABS, which sorts by recency.
+    tabs.sort((a, b) => a.index - b.index);
+
+    const otherCounts = new Map();
+    for (const t of allTabs || []) {
+      if (t.windowId === windowId) continue;
+      otherCounts.set(t.windowId, (otherCounts.get(t.windowId) || 0) + 1);
+    }
+
+    const openUrls = {};
+    for (const t of tabs) if (t.url && openUrls[t.url] == null) openUrls[t.url] = t.id;
+
+    const groupOrder = [];
+    const byGroup = new Map();
+    const ungrouped = [];
+    for (const t of tabs) {
+      const item = mapTab(t);
+      if (t.groupId == null || t.groupId === -1) {
+        ungrouped.push(item);
+        continue;
+      }
+      if (!byGroup.has(t.groupId)) {
+        byGroup.set(t.groupId, []);
+        groupOrder.push(t.groupId);
+      }
+      byGroup.get(t.groupId).push(item);
+    }
+
+    const finish = (groupMeta) => {
+      chrome.storage.local.get(CLOSED_GROUPS_KEY, (store) => {
+        void chrome.runtime.lastError;
+        sendResponse({
+          model: {
+            windowId,
+            groups: groupOrder.map((id) => {
+              const meta = groupMeta.get(id) || {};
+              return {
+                id,
+                title: meta.title || "",
+                color: meta.color || "grey",
+                chromeCollapsed: !!meta.collapsed,
+                tabs: byGroup.get(id) || [],
+              };
+            }),
+            ungrouped,
+            closedGroups: (store && store[CLOSED_GROUPS_KEY]) || [],
+            openUrls,
+            otherWindows: [...otherCounts].map(([id, tabCount]) => ({ windowId: id, tabCount })),
+          },
+        });
+      });
+    };
+
+    if (!chrome.tabGroups) {
+      finish(new Map());
+      return;
+    }
+    chrome.tabGroups.query({ windowId }, (groups) => {
+      void chrome.runtime.lastError;
+      const meta = new Map();
+      for (const g of groups || []) meta.set(g.id, g);
+      finish(meta);
+    });
+  });
+}
+
+// The two cadences are deliberately different: the archive above needs its
+// 250ms quiet window to read the pre-close snapshot, while the sidebar wants to
+// repaint promptly. Both hang off one funnel so there is a single listener set.
+function onTabsChanged() {
+  scheduleSnapshot();
+  scheduleBroadcast();
+}
+
+chrome.tabGroups.onCreated.addListener(onTabsChanged);
+chrome.tabGroups.onUpdated.addListener(onTabsChanged);
+chrome.tabGroups.onMoved.addListener(onTabsChanged);
 chrome.tabGroups.onRemoved.addListener((group) => {
   archiveClosedGroup(group);
-  scheduleSnapshot();
+  onTabsChanged();
 });
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.url || changeInfo.groupId != null) scheduleSnapshot();
+  // The sidebar renders title, favicon, audio and pin state, so it needs more
+  // than the url/groupId the group snapshot cares about.
+  if (
+    changeInfo.url ||
+    changeInfo.groupId != null ||
+    changeInfo.title != null ||
+    changeInfo.favIconUrl != null ||
+    changeInfo.status != null ||
+    changeInfo.pinned != null ||
+    changeInfo.audible != null ||
+    changeInfo.mutedInfo != null
+  ) {
+    onTabsChanged();
+  }
 });
-chrome.tabs.onRemoved.addListener(scheduleSnapshot);
-chrome.tabs.onAttached.addListener(scheduleSnapshot);
+chrome.tabs.onCreated.addListener(onTabsChanged);
+chrome.tabs.onMoved.addListener(onTabsChanged);
+chrome.tabs.onActivated.addListener(scheduleBroadcast);
+chrome.tabs.onDetached.addListener(onTabsChanged);
+chrome.tabs.onReplaced.addListener(onTabsChanged);
+chrome.tabs.onRemoved.addListener((tabId) => {
+  noOverlayTabs.delete(tabId);
+  onTabsChanged();
+});
+chrome.tabs.onAttached.addListener(onTabsChanged);
+chrome.windows.onFocusChanged.addListener(scheduleBroadcast);
 
 snapshotGroups();
 // --------------------------------------------------------------------------
+
+// Serve favicons from Chrome's local cache (_favicon API) instead of the raw
+// favIconUrl: loading e.g. http://127.0.0.1 images from an HTTPS page triggers
+// mixed-content blocks and macOS local-network permission prompts.
+function faviconUrl(url) {
+  return url
+    ? chrome.runtime.getURL("/_favicon/?pageUrl=" + encodeURIComponent(url) + "&size=32")
+    : "";
+}
+
+function mapTab(t) {
+  return {
+    tabId: t.id,
+    windowId: t.windowId,
+    index: t.index,
+    title: t.title || t.url || "",
+    url: t.url || "",
+    favIconUrl: faviconUrl(t.url),
+    active: !!t.active,
+    pinned: !!t.pinned,
+    audible: !!t.audible,
+    muted: !!(t.mutedInfo && t.mutedInfo.muted),
+    discarded: !!t.discarded,
+    groupId: t.groupId,
+    lastAccessed: t.lastAccessed || 0,
+  };
+}
 
 function isRestrictedUrl(url) {
   if (!url) return true;
@@ -90,7 +327,12 @@ function isRestrictedUrl(url) {
     url.startsWith("chrome://") ||
     url.startsWith("about:") ||
     url.startsWith("data:") ||
-    url.startsWith("chrome-extension://")
+    url.startsWith("view-source:") ||
+    url.startsWith("chrome-extension://") ||
+    // The Web Store blocks extension scripts, so the overlay can never run
+    // there — decide for the side panel on the first press, not the second.
+    url.startsWith("https://chromewebstore.google.com/") ||
+    url.startsWith("https://chrome.google.com/webstore")
   );
 }
 
@@ -120,7 +362,22 @@ function sendToggle(tabId, msgType, command, isRetry) {
     // No content script in this tab (tab loaded before install, file://,
     // page still loading…) — inject on demand, then retry once.
     chrome.scripting.executeScript(
-      { target: { tabId }, files: ["loader.js", "loading.js", "content.js"] },
+      {
+        target: { tabId },
+        // Same order as the manifest content_scripts entry — query.js before
+        // content.js, tabgroups.js before sidebar-css.js.
+        files: [
+          "loader.js",
+          "loading.js",
+          "query.js",
+          "content.js",
+          "tabgroups.js",
+          "sidebar-css.js",
+          "sidebar-data.js",
+          "sidebar-view.js",
+          "sidebar.js",
+        ],
+      },
       () => {
         if (chrome.runtime.lastError) {
           // Page Chrome refuses to inject into (chrome://, Web Store…)
@@ -164,8 +421,30 @@ function openPopupFallback(command, originTabId) {
   });
 }
 
+// Toolbar icon toggles the sidebar. Deliberately not
+// sidePanel.setPanelBehavior({openPanelOnActionClick:true}): that would hand
+// the click to Chrome and always force the native panel, where this routes
+// through the same logic as the shortcut and prefers the inline overlay on
+// pages that can host it. (It also only works with no default_popup set, which
+// is why the tab groups popup is gone — the sidebar lists groups itself.)
+chrome.action.onClicked.addListener((tab) => {
+  handleSidebarCommand(tab);
+});
+
 chrome.commands.onCommand.addListener((command, tab) => {
   console.log("[spotlight bg] command:", command, "tab:", tab?.id);
+  if (command === "toggle-sidebar") {
+    // Handled inline, not via processTab: sidePanel.open() must run inside
+    // this synchronous turn or the user gesture is gone.
+    if (tab && tab.id) {
+      handleSidebarCommand(tab);
+    } else {
+      chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+        handleSidebarCommand(tabs && tabs[0]);
+      });
+    }
+    return;
+  }
   const msgType = COMMAND_MESSAGES[command];
   if (!msgType) return;
 
@@ -270,23 +549,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             t.id !== selfTabId &&
             !(t.url || "").startsWith(popupUrl)
         )
-        .map((t) => ({
-          tabId: t.id,
-          windowId: t.windowId,
-          title: t.title || t.url || "",
-          url: t.url || "",
-          // Serve favicons from Chrome's local cache (_favicon API) instead of
-          // the raw favIconUrl: loading e.g. http://127.0.0.1 images from an
-          // HTTPS page triggers mixed-content blocks and macOS local-network
-          // permission prompts.
-          favIconUrl: t.url
-            ? chrome.runtime.getURL(
-                "/_favicon/?pageUrl=" + encodeURIComponent(t.url) + "&size=32"
-              )
-            : "",
-          active: !!t.active,
-          lastAccessed: t.lastAccessed || 0,
-        }))
+        .map(mapTab)
         .sort((a, b) => b.lastAccessed - a.lastAccessed);
       sendResponse({ tabs: list });
     });
@@ -374,6 +637,96 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
     });
     return false;
+  }
+
+  if (msg && msg.type === "SIDEBAR_MODEL") {
+    // The panel passes its own windowId: falling back to the last focused
+    // window shows the wrong tabs when a panel sits in an unfocused window.
+    const known = msg.windowId != null ? msg.windowId : sender.tab && sender.tab.windowId;
+    if (known != null) {
+      buildSidebarModel(known, sendResponse);
+    } else {
+      chrome.windows.getLastFocused({}, (win) => {
+        void chrome.runtime.lastError;
+        if (!win) {
+          sendResponse({ model: null });
+          return;
+        }
+        buildSidebarModel(win.id, sendResponse);
+      });
+    }
+    return true;
+  }
+
+  if (msg && msg.type === "SIDEBAR_CLOSE_TAB" && msg.tabId != null) {
+    chrome.tabs.remove(msg.tabId, () => {
+      void chrome.runtime.lastError;
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+
+  if (msg && msg.type === "SIDEBAR_NEW_TAB") {
+    const create = { active: true };
+    if (msg.url) create.url = msg.url;
+    if (msg.windowId != null) create.windowId = msg.windowId;
+    chrome.tabs.create(create, (tab) => {
+      void chrome.runtime.lastError;
+      if (!tab || tab.id == null) {
+        sendResponse({ ok: false });
+        return;
+      }
+      if (msg.groupId == null || msg.groupId === -1 || !chrome.tabGroups) {
+        sendResponse({ ok: true, tabId: tab.id });
+        return;
+      }
+      chrome.tabs.group({ tabIds: [tab.id], groupId: msg.groupId }, () => {
+        void chrome.runtime.lastError;
+        sendResponse({ ok: true, tabId: tab.id });
+      });
+    });
+    return true;
+  }
+
+  if (msg && msg.type === "SIDEBAR_CLOSE_GROUP" && msg.groupId != null) {
+    // Closing every tab removes the group, and the existing tabGroups.onRemoved
+    // archiver then files it under Recently Closed for free.
+    chrome.tabs.query({ groupId: msg.groupId }, (tabs) => {
+      void chrome.runtime.lastError;
+      const ids = (tabs || []).map((t) => t.id).filter((id) => id != null);
+      if (!ids.length) {
+        sendResponse({ ok: true });
+        return;
+      }
+      chrome.tabs.remove(ids, () => {
+        void chrome.runtime.lastError;
+        sendResponse({ ok: true });
+      });
+    });
+    return true;
+  }
+
+  if (msg && msg.type === "SIDEBAR_MOVE_TAB" && msg.tabId != null) {
+    // Wired up ahead of the drag UI, which is a follow-up.
+    chrome.tabs.move(msg.tabId, { index: msg.index != null ? msg.index : -1 }, () => {
+      void chrome.runtime.lastError;
+      if (msg.groupId === undefined || !chrome.tabGroups) {
+        sendResponse({ ok: true });
+        return;
+      }
+      if (msg.groupId == null || msg.groupId === -1) {
+        chrome.tabs.ungroup(msg.tabId, () => {
+          void chrome.runtime.lastError;
+          sendResponse({ ok: true });
+        });
+        return;
+      }
+      chrome.tabs.group({ tabIds: [msg.tabId], groupId: msg.groupId }, () => {
+        void chrome.runtime.lastError;
+        sendResponse({ ok: true });
+      });
+    });
+    return true;
   }
 
   if (!msg || msg.type !== "SEARCH_SUGGESTIONS") return false;
