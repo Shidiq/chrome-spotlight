@@ -486,7 +486,6 @@ const WIDGET_SYNC_DEFAULTS = {
   widgetCalendar: true,
   widgetTasks: true,
   widgetTabGroups: true,
-  notionDatabaseId: "77c516e8-c36c-4226-9d1f-0d682c5e97f5",
   notionDataSourceId: "7ae3b9f2-031c-4587-98a1-8feae61eba98",
 };
 
@@ -502,7 +501,7 @@ const widgetToggles = ["widgetClock", "widgetCalendar", "widgetTasks", "widgetTa
   document.getElementById(id)
 );
 const notionTokenInput = document.getElementById("notionToken");
-const widgetTextInputs = ["notionDatabaseId", "notionDataSourceId"].map((id) => document.getElementById(id));
+const widgetTextInputs = ["notionDataSourceId"].map((id) => document.getElementById(id));
 
 chrome.storage.sync.get(WIDGET_SYNC_DEFAULTS, (r) => {
   for (const t of widgetToggles) t.checked = r[t.id];
