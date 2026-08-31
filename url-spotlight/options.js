@@ -1,11 +1,5 @@
-const SEARCH_ENGINES = {
-  duckduckgo: { name: "DuckDuckGo", url: "https://duckduckgo.com/?q=" },
-  google: { name: "Google", url: "https://www.google.com/search?q=" },
-  brave: { name: "Brave", url: "https://search.brave.com/search?q=" },
-  startpage: { name: "Startpage", url: "https://www.startpage.com/sp/search?query=" },
-  bing: { name: "Bing", url: "https://www.bing.com/search?q=" }
-};
-const DEFAULT_ENGINE = "duckduckgo";
+const SEARCH_ENGINES = self.SpQuery.SEARCH_ENGINES;
+const DEFAULT_ENGINE = self.SpQuery.DEFAULT_ENGINE;
 const DEFAULT_TASKVIEW_SHORTCUT = { alt: true, ctrl: false, shift: false, meta: false, key: "Tab" };
 // "Hyper" is always all four modifiers, so only the physical key is stored.
 const DEFAULT_HYPER_SHORTCUT = { enabled: false, code: "KeyY" };
@@ -544,3 +538,13 @@ notionTokenInput.addEventListener(
   "input",
   debounce(() => chrome.storage.local.set({ notionToken: notionTokenInput.value.trim() }, showWidgetSaved), 300)
 );
+
+// --- Sidebar ---------------------------------------------------------------
+// Nothing to persist: the sidebar lives in Chrome's side panel, which owns its
+// side and width, and the shortcut is registered by Chrome. An
+// <a href="chrome://…"> won't navigate from an extension page, so open a tab.
+document.getElementById("sidebarShortcutBtn").addEventListener("click", () => {
+  chrome.tabs.create({ url: "chrome://extensions/shortcuts" }, () => {
+    void chrome.runtime.lastError;
+  });
+});

@@ -1,6 +1,8 @@
-// Tab group data layer, shared by the toolbar popup (groups.js) and the new
-// tab widget (widgets.js). Rendering and keyboard handling stay with each
-// caller; everything here is queries, colors, and activation.
+// Tab group data layer, shared by the new tab widget (widgets.js) and the
+// sidebar (which uses COLORS and restoreGroup — the query helpers need an
+// extension-page context and are no use in a content script). Rendering and
+// keyboard handling stay with each caller; everything here is queries, colors,
+// and activation.
 (() => {
   "use strict";
 
