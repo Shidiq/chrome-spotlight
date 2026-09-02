@@ -10,12 +10,14 @@
     widgetClock: true,
     widgetCalendar: true,
     widgetTasks: true,
+    widgetScratchpad: true,
     notionDataSourceId: "7ae3b9f2-031c-4587-98a1-8feae61eba98",
   };
   // Connected accounts and their calendar picks live in gcal.js, which reads
   // them per account; they are watched here only to re-render on change.
   const GCAL_SYNC_KEYS = ["googleAccounts", "calendarOverrides"];
   const CACHE_KEY = "widgetsCache";
+  const SCRATCH_KEY = "scratchpad";
   const TOKEN_KEY = "notionToken";
   const REFRESH_MS = 5 * 60 * 1000;
 
@@ -39,6 +41,35 @@
   function saveCache(patch) {
     cache = { ...cache, ...patch };
     chrome.storage.local.set({ [CACHE_KEY]: cache });
+  }
+
+  // The scratchpad is hand-typed and device-local: its own key, never sync
+  // (free-form notes blow past the ~8KB-per-item sync quota) and never inside
+  // widgetsCache, whose shallow-merge writes would race with it.
+  const EMPTY_SCRATCH = { notes: "", items: [] };
+
+  let scratch = { ...EMPTY_SCRATCH };
+  let scratchWritten = ""; // last JSON this tab wrote, to ignore its own echo
+  let scratchTimer = null;
+
+  function normalizeScratch(v) {
+    if (!v || !Array.isArray(v.items)) return { ...EMPTY_SCRATCH };
+    return { notes: typeof v.notes === "string" ? v.notes : "", items: v.items };
+  }
+
+  function loadScratch() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get({ [SCRATCH_KEY]: null }, (r) => resolve(normalizeScratch(r[SCRATCH_KEY])));
+    });
+  }
+
+  // Debounced, or every keystroke would hit storage.
+  function saveScratch() {
+    clearTimeout(scratchTimer);
+    scratchTimer = setTimeout(() => {
+      scratchWritten = JSON.stringify(scratch);
+      chrome.storage.local.set({ [SCRATCH_KEY]: scratch });
+    }, 400);
   }
 
   // ------------------------------------------------------ clock and up next
@@ -249,7 +280,7 @@
     head.appendChild(note);
     const body = el("div", "sp-card-body");
     c.append(head, body);
-    return { root: c, body, note };
+    return { root: c, head, body, note };
   }
 
   function setNote(cardRef, text) {
@@ -402,19 +433,173 @@
     body.appendChild(btn);
   }
 
+  // ------------------------------------------------------------ scratchpad
+
+  function scratchMarkdown() {
+    const parts = [];
+    const notes = scratch.notes.trim();
+    if (notes) parts.push(notes);
+    const items = scratch.items.filter((i) => i.text.trim());
+    if (items.length) {
+      parts.push(items.map((i) => `- [${i.done ? "x" : " "}] ${i.text.trim()}`).join("\n"));
+    }
+    return parts.join("\n\n");
+  }
+
+  function newItem(text) {
+    return { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7), text: text || "", done: false };
+  }
+
+  // The textarea grows with its content until the CSS max-height takes over and
+  // the card body scrolls instead.
+  function autoGrow(area) {
+    area.style.height = "auto";
+    area.style.height = area.scrollHeight + "px";
+  }
+
+  function scratchRow(item, list) {
+    const row = el("div", "sp-row sp-scratch-row" + (item.done ? " done" : ""));
+
+    const check = el("button", "sp-check");
+    check.setAttribute("role", "checkbox");
+    check.setAttribute("aria-checked", item.done ? "true" : "false");
+    check.title = "Toggle done";
+    // Unlike the Notion rows, which push a one-way Done to the API, this list
+    // owns its state and toggles both ways.
+    check.addEventListener("click", () => {
+      item.done = !item.done;
+      check.setAttribute("aria-checked", item.done ? "true" : "false");
+      row.classList.toggle("done", item.done);
+      saveScratch();
+    });
+
+    const text = el("input", "sp-scratch-text");
+    text.type = "text";
+    text.value = item.text;
+    text.addEventListener("input", () => {
+      item.text = text.value;
+      saveScratch();
+    });
+    text.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const next = newItem("");
+        scratch.items.splice(scratch.items.indexOf(item) + 1, 0, next);
+        saveScratch();
+        renderList(list, next.id);
+      } else if (e.key === "Backspace" && !text.value) {
+        e.preventDefault();
+        const at = scratch.items.indexOf(item);
+        scratch.items.splice(at, 1);
+        saveScratch();
+        renderList(list, at > 0 ? scratch.items[at - 1].id : null);
+      }
+    });
+
+    const del = el("button", "sp-scratch-del", "×");
+    del.setAttribute("aria-label", "Delete item");
+    del.addEventListener("click", () => {
+      scratch.items.splice(scratch.items.indexOf(item), 1);
+      saveScratch();
+      renderList(list, null);
+    });
+
+    row.append(check, text, del);
+    return row;
+  }
+
+  // Only structural changes rebuild the list; `focusId` puts the caret back
+  // where the user left it, at the end of that row's text.
+  function renderList(list, focusId) {
+    list.textContent = "";
+    for (const item of scratch.items) list.appendChild(scratchRow(item, list));
+    if (!focusId) return;
+    const idx = scratch.items.findIndex((i) => i.id === focusId);
+    const row = idx >= 0 ? list.children[idx] : null;
+    if (!row) return;
+    const input = row.querySelector(".sp-scratch-text");
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+
+  function renderScratch(cardRef) {
+    const body = cardRef.body;
+    body.textContent = "";
+
+    const notes = el("textarea", "sp-scratch-notes");
+    notes.placeholder = "Notes…";
+    notes.value = scratch.notes;
+    notes.addEventListener("input", () => {
+      scratch.notes = notes.value;
+      autoGrow(notes);
+      saveScratch();
+    });
+    body.append(notes, el("div", "sp-scratch-sep"));
+
+    const list = el("div", "sp-scratch-list");
+    body.appendChild(list);
+    renderList(list, null);
+
+    const addRow = el("div", "sp-row sp-scratch-row");
+    const add = el("input", "sp-scratch-add");
+    add.type = "text";
+    add.placeholder = "Add item…";
+    add.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || !add.value.trim()) return;
+      e.preventDefault();
+      scratch.items.push(newItem(add.value.trim()));
+      add.value = "";
+      saveScratch();
+      renderList(list, null);
+    });
+    // Spacer stands in for the checkbox so the add field lines up with the rows.
+    addRow.append(el("span", "sp-scratch-spacer"), add);
+    body.appendChild(addRow);
+
+    // scrollHeight is only meaningful once the textarea has been laid out.
+    requestAnimationFrame(() => autoGrow(notes));
+  }
+
+  let copyNoteTimer = null;
+
+  function buildScratchCard() {
+    const ref = card("Scratchpad", true);
+    const copy = el("button", "sp-card-btn", "Copy");
+    copy.title = "Copy as Markdown";
+    copy.addEventListener("click", async () => {
+      const md = scratchMarkdown();
+      if (!md) {
+        setNote(ref, "Nothing to copy");
+      } else {
+        try {
+          await navigator.clipboard.writeText(md);
+          setNote(ref, "Copied");
+        } catch (e) {
+          console.error("[widgets] clipboard write failed", e);
+          setNote(ref, "Copy failed");
+        }
+      }
+      clearTimeout(copyNoteTimer);
+      copyNoteTimer = setTimeout(() => setNote(ref, ""), 1500);
+    });
+    ref.head.appendChild(copy);
+    return ref;
+  }
+
   // -------------------------------------------------------------- scheduler
 
   let cfg = null;
   let root = null;
   let agendaCard = null;
   let tasksCard = null;
+  let scratchCard = null;
   let nextEvent = null;
   let lastFetch = { calendar: 0, tasks: 0 };
 
   function renderShell() {
     root.textContent = "";
     tickers.length = 0;
-    agendaCard = tasksCard = null;
+    agendaCard = tasksCard = scratchCard = null;
     nextEvent = null;
 
     const head = el("div", "sp-head");
@@ -430,24 +615,34 @@
     // track and grow past the viewport instead of scrolling internally.
     root.dataset.head = head.childNodes.length ? "1" : "0";
 
-    const cols = [];
+    const cols = []; // [{ cls, nodes }] — one column can stack several cards
     if (cfg.widgetCalendar) {
       agendaCard = card("Agenda", true);
       agendaCard.body.appendChild(el("div", "sp-empty", "Loading…"));
-      cols.push(["sp-col-agenda", agendaCard.root]);
+      cols.push({ cls: "sp-col-agenda", nodes: [agendaCard.root] });
     }
     if (cfg.widgetTasks) {
       tasksCard = card("Tasks", true);
       tasksCard.body.appendChild(el("div", "sp-empty", "Loading…"));
-      cols.push(["sp-col-tasks", tasksCard.root]);
+      cols.push({ cls: "sp-col-tasks", nodes: [tasksCard.root] });
     }
-    for (const [cls, node] of cols) {
+    if (cfg.widgetScratchpad) {
+      scratchCard = buildScratchCard();
+      // Riding along under Tasks keeps the grid at two tracks; with Tasks off
+      // it needs a column of its own or it would have nowhere to land.
+      const tasksCol = cols.find((c) => c.cls === "sp-col-tasks");
+      if (tasksCol) tasksCol.nodes.push(scratchCard.root);
+      else cols.push({ cls: "sp-col-scratch", nodes: [scratchCard.root] });
+    }
+    for (const { cls, nodes } of cols) {
       const col = el("div", "sp-col " + cls);
-      col.appendChild(node);
+      col.append(...nodes);
       root.appendChild(col);
     }
     // Columns are auto-placed; the CSS needs the count to size the tracks.
     root.dataset.cols = String(cols.length);
+    // Local data, nothing to fetch, so it paints here instead of in refreshAll.
+    if (scratchCard) renderScratch(scratchCard);
   }
 
   function renderCalendarData(events) {
@@ -600,6 +795,7 @@
     if (!root) return;
     cfg = await loadConfig();
     cache = await loadCache();
+    scratch = await loadScratch();
     renderShell();
 
     // stale-while-revalidate: paint cached data immediately
@@ -619,6 +815,17 @@
     });
 
     chrome.storage.onChanged.addListener(async (changes, area) => {
+      // Handled ahead of the shell check, and deliberately kept out of it: a
+      // renderShell() on every debounced keystroke would eat the caret.
+      if (area === "local" && changes[SCRATCH_KEY]) {
+        const next = changes[SCRATCH_KEY].newValue;
+        // Another tab's edit — and not while this one is being typed in.
+        if (JSON.stringify(next) !== scratchWritten) {
+          scratch = normalizeScratch(next);
+          if (scratchCard && !scratchCard.root.contains(document.activeElement)) renderScratch(scratchCard);
+        }
+      }
+
       const keys = Object.keys(changes);
       const relevant =
         (area === "sync" && keys.some((k) => k in SYNC_DEFAULTS || GCAL_SYNC_KEYS.includes(k))) ||

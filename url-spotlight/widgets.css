@@ -160,6 +160,7 @@
   justify-content: space-between;
   gap: 8px;
 }
+.sp-card-title > span:first-child { margin-right: auto; }
 .sp-card-note {
   font-size: 11px;
   font-weight: 400;
@@ -327,6 +328,112 @@ a.sp-row:hover { background: var(--sp-badge-bg); }
   color: var(--sp-danger);
 }
 
+/* --- scratchpad --- */
+/* Ghost button for the card header; .sp-btn is the accent call-to-action and
+   would shout next to the title. */
+.sp-card-btn {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid var(--sp-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sp-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.sp-card-btn:hover {
+  border-color: var(--sp-accent);
+  color: var(--sp-accent);
+}
+
+/* Height is set from scrollHeight on input, so the manual grip would fight it. */
+.sp-scratch-notes {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  max-height: 40vh;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  resize: none;
+  color: var(--sp-text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.sp-scratch-sep {
+  height: 1px;
+  margin: 8px 10px;
+  background: var(--sp-border);
+}
+
+.sp-scratch-row:hover { background: var(--sp-badge-bg); }
+.sp-scratch-row.done .sp-scratch-text {
+  text-decoration: line-through;
+  opacity: 0.45;
+}
+/* Ticked items stay in the list, so unlike the Notion rows the box needs a
+   checked state of its own. Resets what .sp-check:hover::after sets. */
+.sp-scratch-row.done .sp-check {
+  background: var(--sp-accent);
+  border-color: var(--sp-accent);
+}
+.sp-scratch-row.done .sp-check::after {
+  content: "";
+  position: absolute;
+  inset: auto;
+  top: 1px;
+  left: 4.5px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--sp-on-accent);
+  border-width: 0 2px 2px 0;
+  border-radius: 0;
+  background: transparent;
+  opacity: 1;
+  transform: rotate(45deg);
+}
+.sp-scratch-spacer { flex: 0 0 18px; }
+.sp-scratch-text,
+.sp-scratch-add {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--sp-text);
+  font-family: inherit;
+  font-size: 14px;
+}
+.sp-scratch-notes:focus,
+.sp-scratch-text:focus,
+.sp-scratch-add:focus { outline: none; }
+.sp-scratch-notes::placeholder,
+.sp-scratch-text::placeholder,
+.sp-scratch-add::placeholder { color: var(--sp-muted); }
+
+/* Hidden until the row is hovered or focused so the list stays quiet. */
+.sp-scratch-del {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: var(--sp-muted);
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.sp-scratch-row:hover .sp-scratch-del,
+.sp-scratch-row:focus-within .sp-scratch-del { opacity: 1; }
+.sp-scratch-del:hover { color: var(--sp-danger); }
+
 /* --- narrow windows --- */
 /* The columns stop filling the viewport height and scroll as one block. */
 @media (max-width: 1279px) {
@@ -355,5 +462,6 @@ a.sp-row:hover { background: var(--sp-badge-bg); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sp-task { transition: none; }
+  .sp-task,
+  .sp-scratch-del { transition: none; }
 }

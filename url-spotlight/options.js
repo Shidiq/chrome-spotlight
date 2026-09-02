@@ -485,6 +485,7 @@ const WIDGET_SYNC_DEFAULTS = {
   widgetClock: true,
   widgetCalendar: true,
   widgetTasks: true,
+  widgetScratchpad: true,
   notionDataSourceId: "7ae3b9f2-031c-4587-98a1-8feae61eba98",
 };
 
@@ -496,7 +497,7 @@ function showWidgetSaved() {
   widgetStatusTimer = setTimeout(() => widgetStatus.classList.remove("show"), 1500);
 }
 
-const widgetToggles = ["widgetClock", "widgetCalendar", "widgetTasks"].map((id) =>
+const widgetToggles = ["widgetClock", "widgetCalendar", "widgetTasks", "widgetScratchpad"].map((id) =>
   document.getElementById(id)
 );
 const notionTokenInput = document.getElementById("notionToken");
