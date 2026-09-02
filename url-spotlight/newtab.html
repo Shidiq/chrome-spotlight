@@ -18,11 +18,15 @@
     body {
       background: #0a0e1c;
     }
-    /* Aurora: layered radial glows, heavily blurred, drifting slowly. */
+    /* Aurora: layered radial glows, heavily blurred. Deliberately static — see
+       the note by will-change below. */
     body::before {
       content: "";
       position: fixed;
-      inset: -25%;
+      /* Bleed just past the viewport so the 70px blur doesn't fade at the
+         edges. It used to be -25% to hide the drift's rotate/scale corners;
+         without those, -10% is enough, and the layer is ~40% smaller. */
+      inset: -10%;
       z-index: 0;
       background:
         radial-gradient(ellipse 55% 45% at 18% 28%, rgba(56, 189, 248, 0.42), transparent 62%),
@@ -31,7 +35,15 @@
         radial-gradient(ellipse 40% 40% at 38% 62%, rgba(236, 72, 153, 0.16), transparent 60%),
         radial-gradient(ellipse 45% 35% at 90% 70%, rgba(59, 130, 246, 0.22), transparent 60%);
       filter: blur(70px) saturate(1.2);
-      animation: sp-aurora 45s ease-in-out infinite alternate;
+      /* This used to drift on a 45s infinite alternate. Two things made that
+         expensive enough to peg a core for as long as the tab was open:
+         the keyframes changed scale/rotate, so the blurred layer could not be
+         reused as a cached texture and was re-rasterised every frame (a 70px
+         blur over ~1.5 viewports); and .sp-card's backdrop-filter had to
+         re-blur its backdrop every frame too, once per card. Static, both are
+         paid once. prefers-reduced-motion already rendered it this way. */
+      /* Keeps the glow on its own compositor layer so unrelated repaints (the
+         clock ticking each second) can't invalidate the blur. */
       will-change: transform;
     }
     /* Faint grain-less vignette keeps card edges and clock readable. */
@@ -42,11 +54,6 @@
       z-index: 0;
       background: radial-gradient(ellipse 120% 100% at 50% 0%, transparent 60%, rgba(4, 6, 14, 0.45));
       pointer-events: none;
-    }
-    @keyframes sp-aurora {
-      0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
-      50%  { transform: translate3d(3%, -2%, 0) rotate(4deg) scale(1.08); }
-      100% { transform: translate3d(-3%, 2%, 0) rotate(-3deg) scale(1.12); }
     }
     @media (prefers-color-scheme: light) {
       body { background: #eef2f9; }
@@ -61,9 +68,6 @@
       body::after {
         background: radial-gradient(ellipse 120% 100% at 50% 0%, transparent 65%, rgba(255, 255, 255, 0.35));
       }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      body::before { animation: none; }
     }
   </style>
   <link rel="stylesheet" href="widgets.css">
