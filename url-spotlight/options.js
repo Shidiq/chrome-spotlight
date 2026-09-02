@@ -1,11 +1,5 @@
-const SEARCH_ENGINES = {
-  duckduckgo: { name: "DuckDuckGo", url: "https://duckduckgo.com/?q=" },
-  google: { name: "Google", url: "https://www.google.com/search?q=" },
-  brave: { name: "Brave", url: "https://search.brave.com/search?q=" },
-  startpage: { name: "Startpage", url: "https://www.startpage.com/sp/search?query=" },
-  bing: { name: "Bing", url: "https://www.bing.com/search?q=" }
-};
-const DEFAULT_ENGINE = "duckduckgo";
+const SEARCH_ENGINES = self.SpQuery.SEARCH_ENGINES;
+const DEFAULT_ENGINE = self.SpQuery.DEFAULT_ENGINE;
 const DEFAULT_TASKVIEW_SHORTCUT = { alt: true, ctrl: false, shift: false, meta: false, key: "Tab" };
 // "Hyper" is always all four modifiers, so only the physical key is stored.
 const DEFAULT_HYPER_SHORTCUT = { enabled: false, code: "KeyY" };
@@ -491,7 +485,6 @@ const WIDGET_SYNC_DEFAULTS = {
   widgetClock: true,
   widgetCalendar: true,
   widgetTasks: true,
-  notionDatabaseId: "77c516e8-c36c-4226-9d1f-0d682c5e97f5",
   notionDataSourceId: "7ae3b9f2-031c-4587-98a1-8feae61eba98",
 };
 
@@ -507,7 +500,7 @@ const widgetToggles = ["widgetClock", "widgetCalendar", "widgetTasks"].map((id) 
   document.getElementById(id)
 );
 const notionTokenInput = document.getElementById("notionToken");
-const widgetTextInputs = ["notionDatabaseId", "notionDataSourceId"].map((id) => document.getElementById(id));
+const widgetTextInputs = ["notionDataSourceId"].map((id) => document.getElementById(id));
 
 chrome.storage.sync.get(WIDGET_SYNC_DEFAULTS, (r) => {
   for (const t of widgetToggles) t.checked = r[t.id];

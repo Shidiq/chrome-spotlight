@@ -10,7 +10,6 @@
     widgetClock: true,
     widgetCalendar: true,
     widgetTasks: true,
-    notionDatabaseId: "77c516e8-c36c-4226-9d1f-0d682c5e97f5",
     notionDataSourceId: "7ae3b9f2-031c-4587-98a1-8feae61eba98",
   };
   // Connected accounts and their calendar picks live in gcal.js, which reads
@@ -169,12 +168,20 @@
     if (!res.ok) {
       let err = {};
       try { err = await res.json(); } catch {}
-      throw { status: res.status, code: err.code, message: err.message };
+      // A real Error, so a failed fetch (TypeError, no .status) and an API
+      // error stay distinguishable to callers and readable in the console.
+      const e = new Error(err.message || `Notion ${res.status}`);
+      e.status = res.status;
+      e.code = err.code;
+      throw e;
     }
     return res.json();
   }
 
-  const ACTIVE_STATUSES = ["Not started", "On Scheduled", "In progress"];
+  // Notion's API can't filter by status *group*, so exclude the two options in
+  // the Complete group instead of listing the active ones. That survives
+  // renames of the to-do/in-progress options and picks up "Waiting for".
+  const DONE_STATUSES = ["Done", "Decluter"];
   const PRIO_ORDER = { Tinggi: 0, Sedang: 1, Rendah: 2 };
 
   function plain(richArr) {
@@ -187,7 +194,7 @@
       token: cfg.notionToken,
       body: {
         filter: {
-          or: ACTIVE_STATUSES.map((name) => ({ property: "Status", status: { equals: name } })),
+          and: DONE_STATUSES.map((name) => ({ property: "Status", status: { does_not_equal: name } })),
         },
         sorts: [{ property: "Due Date", direction: "ascending" }],
         page_size: 50,
@@ -357,7 +364,8 @@
           row.remove();
           onRemoved(task);
         }, 400);
-      } catch {
+      } catch (e) {
+        console.error("[widgets] Notion completeTask failed", e);
         row.classList.remove("done");
         check.setAttribute("aria-checked", "false");
         const fail = el("span", "sp-fail", "Failed — try again");
@@ -548,6 +556,7 @@
       setNote(tasksCard, "");
       renderTasks(tasksCard, items, cfg);
     } catch (e) {
+      console.error("[widgets] Notion tasks failed", e);
       const status = e && e.status;
       if (status === 401) {
         tasksCard.body.textContent = "";
@@ -560,12 +569,23 @@
         tasksCard.body.appendChild(
           el("div", "sp-hint", "Notion can't find the database. In Notion, open Task Tracker → ••• → Connections → add your integration.")
         );
+      } else if (status === 429) {
+        tasksCard.body.textContent = "";
+        tasksCard.body.appendChild(el("div", "sp-hint", "Notion is rate-limiting — retrying shortly."));
       } else if (cache.tasks && cache.tasks.items) {
         setNote(tasksCard, "Couldn't refresh");
         renderTasks(tasksCard, cache.tasks.items, cfg);
+      } else if (!status) {
+        // fetch() itself rejected: offline, or host_permissions withheld
+        // ("Site access: on click"), which kills the extension CORS bypass.
+        tasksCard.body.textContent = "";
+        tasksCard.body.appendChild(
+          el("div", "sp-hint", "Can't reach Notion — check your connection and the extension's site access.")
+        );
       } else {
         tasksCard.body.textContent = "";
-        tasksCard.body.appendChild(el("div", "sp-empty", "Couldn't load tasks"));
+        const why = `${status} ${(e && e.message) || ""}`.trim();
+        tasksCard.body.appendChild(el("div", "sp-empty", `Couldn't load tasks — ${why}`));
       }
     }
   }

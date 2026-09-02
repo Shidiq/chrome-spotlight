@@ -331,13 +331,11 @@
     <div class="field">
       <label for="notionDataSourceId">Notion data source ID</label>
       <input type="text" id="notionDataSourceId" autocomplete="off">
-    </div>
-    <div class="field">
-      <label for="notionDatabaseId">Notion database ID</label>
-      <input type="text" id="notionDatabaseId" autocomplete="off">
+      <p class="field-note">A data source ID, not a database ID — since Notion API version 2025-09-03 the two differ. Open the database as a full page, then ••• → Copy link to data source.</p>
     </div>
     <div class="status" id="widgetStatus">Saved</div>
   </div>
+  <script src="query.js"></script>
   <script src="gcal.js"></script>
   <script src="loader.js"></script>
   <script src="options.js"></script>
